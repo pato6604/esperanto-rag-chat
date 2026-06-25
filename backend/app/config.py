@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai"
 
     embedding_model: str = "gemini-embedding-001"
-    chat_model: str = "gemini-2.0-flash"
+    chat_model: str = "gemini-2.5-flash"
 
     qdrant_path: str = "./qdrant_db"
     collection_name: str = "rag_docs"

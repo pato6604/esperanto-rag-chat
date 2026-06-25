@@ -5,4 +5,5 @@ qdrant-client>=1.13.0
 python-multipart>=0.0.9
 pypdf>=5.0.0
 python-dotenv>=1.0.0
+pydantic-settings>=2.0.0
 tiktoken>=0.7.0

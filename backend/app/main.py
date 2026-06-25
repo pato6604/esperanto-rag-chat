@@ -20,4 +20,4 @@ app.include_router(chat_router)
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "model": settings.chat_model}
+    return {"status": "ok"}

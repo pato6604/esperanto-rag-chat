@@ -1,9 +1,29 @@
+# Python
 venv/
 __pycache__/
 *.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Node
 node_modules/
 .next/
+
+# Env files
 .env
+.env.local
 *.env
+
+# Qdrant
 qdrant_db/
+
+# Logs
+*.log
+uvicorn-*.out.log
+uvicorn-*.err.log
+
+# OS
 .DS_Store
+Thumbs.db
