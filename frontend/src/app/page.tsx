@@ -40,14 +40,24 @@ const MOCK_SESSIONS: Session[] = [
   { id: "3", title: "Arquitectura del proyecto", active: false },
 ];
 
-export default function ChatPage() {
-  const [messages, setMessages] = useState<Message[]>([
+const DEFAULT_SESSION: Session = {
+  id: "default",
+  title: "Analisis de documentos",
+  active: true,
+};
+
+function createInitialMessages(): Message[] {
+  return [
     {
       role: "assistant",
       content:
         "Hola. Soy tu asistente Esperanto. Subi documentos y preguntame lo que quieras.",
     },
-  ]);
+  ];
+}
+
+export default function ChatPage() {
+  const [messages, setMessages] = useState<Message[]>(createInitialMessages);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [streaming, setStreaming] = useState(false);
@@ -61,6 +71,8 @@ export default function ChatPage() {
   const [sessions, setSessions] = useState<Session[]>(MOCK_SESSIONS);
 
   const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  const activeSessionTitle =
+    sessions.find((session) => session.active)?.title || DEFAULT_SESSION.title;
 
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -399,6 +411,7 @@ export default function ChatPage() {
               const newId = String(Date.now());
               const newSession: Session = { id: newId, title: "Nueva sesion", active: true };
               setSessions((prev) => prev.map((s) => ({ ...s, active: false })).concat(newSession));
+              setMessages(createInitialMessages());
             }}
             className="w-full justify-start gap-2 rounded-lg border-sidebar-border bg-[#151515]/70 text-sidebar-foreground hover:border-[#3ecf8e]/35 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
           >
@@ -428,7 +441,25 @@ export default function ChatPage() {
                   className="size-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-60 hover:opacity-100"
                   onClick={(e) => {
                     e.stopPropagation();
-                    setSessions((prev) => prev.filter((session) => session.id !== s.id));
+                    if (s.active) {
+                      setMessages(createInitialMessages());
+                    }
+                    setSessions((prev) => {
+                      const remaining = prev.filter((session) => session.id !== s.id);
+
+                      if (!s.active) {
+                        return remaining;
+                      }
+
+                      if (remaining.length === 0) {
+                        return [DEFAULT_SESSION];
+                      }
+
+                      return remaining.map((session, index) => ({
+                        ...session,
+                        active: index === 0,
+                      }));
+                    });
                   }}
                 />
               </button>
@@ -454,7 +485,7 @@ export default function ChatPage() {
               <PanelLeft className="size-5" />
             </button>
             <h1 className="truncate text-base font-semibold">
-              Analisis de documentos
+              {activeSessionTitle}
             </h1>
             <span
               className="inline-flex items-center rounded-full px-1"

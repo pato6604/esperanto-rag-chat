@@ -146,6 +146,9 @@ def ingest_bytes(data: bytes, filename: str) -> int:
         )
         embeddings.extend(e.embedding for e in resp.data)
 
+    client.delete_collection(collection_name=settings.collection_name)
+    _ensure_collection(client)
+
     # Store in Qdrant
     points = []
     for i, (chunk, emb) in enumerate(zip(chunks, embeddings)):
