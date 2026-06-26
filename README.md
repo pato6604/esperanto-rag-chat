@@ -1,6 +1,6 @@
-# 📚 RAG Chat — Sistema de Preguntas y Respuestas sobre Documentos
+# 🗣️ Esperanto
 
-Chateá con tus documentos usando **RAG** (Retrieval-Augmented Generation).
+Un sistema RAG para chatear con documentos — en tu idioma.
 
 ## Stack
 
@@ -22,8 +22,8 @@ Chateá con tus documentos usando **RAG** (Retrieval-Augmented Generation).
 
 ```bash
 # 1. Clonar el repo
-git clone https://github.com/pato6604/rag-chat.git
-cd rag-chat
+git clone https://github.com/pato6604/Esperanto.git
+cd Esperanto
 ```
 
 ### 2. Backend
@@ -42,7 +42,7 @@ pip install -r requirements.txt
 
 ### 3. API Key
 
-Configurá tu `GOOGLE_API_KEY` en el archivo `.env` de Hermes o como variable de entorno.
+Configurá tu `GOOGLE_API_KEY` en el archivo `.env` del proyecto o como variable de entorno.
 
 ### 4. Correr backend
 
@@ -81,7 +81,7 @@ Abrir http://localhost:3000
 ## Estructura del proyecto
 
 ```
-rag-project/
+Esperanto/
 ├── backend/
 │   ├── app/
 │   │   ├── main.py          # Servidor FastAPI

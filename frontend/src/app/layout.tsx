@@ -10,8 +10,8 @@ const sourceSerif = Source_Serif_4({
 });
 
 export const metadata: Metadata = {
-  title: "RAG Chat",
-  description: "Chat with your documents using RAG",
+  title: "Esperanto",
+  description: "Chat with your documents",
   icons: {
     icon: "/rag-favicon.svg",
   },

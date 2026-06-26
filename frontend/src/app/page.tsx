@@ -45,7 +45,7 @@ export default function ChatPage() {
     {
       role: "assistant",
       content:
-        "Hola. Soy tu asistente RAG. Subi documentos y preguntame lo que quieras.",
+        "Hola. Soy tu asistente Esperanto. Subi documentos y preguntame lo que quieras.",
     },
   ]);
   const [input, setInput] = useState("");
@@ -354,7 +354,7 @@ export default function ChatPage() {
             <FileText className="size-4 text-[#0f0f0f]" />
           </div>
           <span className="text-base font-semibold">
-            RAG Chat
+            Esperanto
           </span>
         </div>
 
