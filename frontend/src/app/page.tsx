@@ -57,7 +57,7 @@ export default function ChatPage() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const streamControllerRef = useRef<AbortController | null>(null);
-  const [sessions] = useState<Session[]>(MOCK_SESSIONS);
+  const [sessions, setSessions] = useState<Session[]>(MOCK_SESSIONS);
 
   const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -362,6 +362,11 @@ export default function ChatPage() {
           <Button
             variant="outline"
             size="sm"
+            onClick={() => {
+              const newId = String(Date.now());
+              const newSession: Session = { id: newId, title: "Nueva sesion", active: true };
+              setSessions((prev) => prev.map((s) => ({ ...s, active: false })).concat(newSession));
+            }}
             className="w-full justify-start gap-2 rounded-lg border-sidebar-border bg-[#151515]/70 text-sidebar-foreground hover:border-[#3ecf8e]/35 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
           >
             <Plus className="size-4" />
@@ -386,7 +391,13 @@ export default function ChatPage() {
               >
                 <MessageSquare className="size-4 shrink-0" />
                 <span className="min-w-0 flex-1 truncate">{s.title}</span>
-                <Trash2 className="size-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-60 hover:opacity-100" />
+                <Trash2
+                  className="size-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-60 hover:opacity-100"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSessions((prev) => prev.filter((session) => session.id !== s.id));
+                  }}
+                />
               </button>
             ))}
           </div>
