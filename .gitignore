@@ -24,6 +24,15 @@ qdrant_db/
 uvicorn-*.out.log
 uvicorn-*.err.log
 
+# Codex temp files
+codex_task.md
+review_diff.txt
+review_payload.json
+pretty_print.py
+
+# Codex sandbox scripts
+frontend/scripts/
+
 # OS
 .DS_Store
 Thumbs.db
