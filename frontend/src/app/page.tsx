@@ -245,13 +245,11 @@ export default function ChatPage() {
           setStreaming(true);
           if (assistantIndex === null) {
             setLoading(false);
-            setMessages((prev) => {
-              assistantIndex = prev.length;
-              return [
-                ...prev,
-                { role: "assistant", content: event.content },
-              ];
-            });
+            assistantIndex = messages.length + 1;
+            setMessages((prev) => [
+              ...prev,
+              { role: "assistant", content: event.content },
+            ]);
             return false;
           }
 
