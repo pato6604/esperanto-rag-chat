@@ -34,15 +34,9 @@ type Session = {
   active: boolean;
 };
 
-const MOCK_SESSIONS: Session[] = [
-  { id: "1", title: "Analisis de documentos", active: true },
-  { id: "2", title: "Reporte Q4 2025", active: false },
-  { id: "3", title: "Arquitectura del proyecto", active: false },
-];
-
 const DEFAULT_SESSION: Session = {
   id: "default",
-  title: "Analisis de documentos",
+  title: "Nueva Sesion",
   active: true,
 };
 
@@ -56,8 +50,23 @@ function createInitialMessages(): Message[] {
   ];
 }
 
+function deriveSessionTitle(messages: Message[]): string {
+  const firstUserMessage = messages.find((message) => message.role === "user");
+
+  if (!firstUserMessage) {
+    return "Nueva Sesion";
+  }
+
+  const title = firstUserMessage.content.trim().replace(/\s+/g, " ");
+  return title.length > 30 ? `${title.slice(0, 30)}...` : title;
+}
+
 export default function ChatPage() {
-  const [messages, setMessages] = useState<Message[]>(createInitialMessages);
+  const [sessionMessages, setSessionMessages] = useState<
+    Record<string, Message[]>
+  >({
+    default: createInitialMessages(),
+  });
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [streaming, setStreaming] = useState(false);
@@ -68,11 +77,36 @@ export default function ChatPage() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const streamControllerRef = useRef<AbortController | null>(null);
-  const [sessions, setSessions] = useState<Session[]>(MOCK_SESSIONS);
+  const [sessions, setSessions] = useState<Session[]>([DEFAULT_SESSION]);
 
   const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  const activeSessionId =
+    sessions.find((session) => session.active)?.id || DEFAULT_SESSION.id;
   const activeSessionTitle =
     sessions.find((session) => session.active)?.title || DEFAULT_SESSION.title;
+  const messages = sessionMessages[activeSessionId] || createInitialMessages();
+
+  function updateSessionMessages(
+    sessionId: string,
+    updater: Message[] | ((prev: Message[]) => Message[]),
+  ) {
+    setSessionMessages((prev) => {
+      const currentMessages = prev[sessionId] || createInitialMessages();
+      const nextMessages =
+        typeof updater === "function" ? updater(currentMessages) : updater;
+
+      return {
+        ...prev,
+        [sessionId]: nextMessages,
+      };
+    });
+  }
+
+  function updateActiveSessionMessages(
+    updater: Message[] | ((prev: Message[]) => Message[]),
+  ) {
+    updateSessionMessages(activeSessionId, updater);
+  }
 
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -116,11 +150,11 @@ export default function ChatPage() {
     return "Error de conexión. Revisá que el backend esté corriendo en el puerto correcto.";
   }
 
-  function appendAssistantError(content: string) {
+  function appendAssistantError(content: string, sessionId = activeSessionId) {
     const visibleContent = content.toLowerCase().includes("gemini")
       ? `Atención: ${content.replace(/^Atención:\s*/i, "")}`
       : content;
-    setMessages((prev) => [
+    updateSessionMessages(sessionId, (prev) => [
       ...prev,
       {
         role: "assistant",
@@ -143,25 +177,29 @@ export default function ChatPage() {
     return getErrorMessage(res.status);
   }
 
-  async function sendMessageFallback(messageText: string, status?: number) {
+  async function sendMessageFallback(
+    messageText: string,
+    status?: number,
+    sessionId = activeSessionId,
+  ) {
     if (status && [400, 429, 502, 503].includes(status)) {
-      appendAssistantError(getErrorMessage(status));
+      appendAssistantError(getErrorMessage(status), sessionId);
       return;
     }
 
     const res = await fetch(`${API_BASE}/api/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: messageText, session_id: "default" }),
+      body: JSON.stringify({ message: messageText, session_id: sessionId }),
     });
 
     if (!res.ok) {
-      appendAssistantError(await getResponseErrorMessage(res));
+      appendAssistantError(await getResponseErrorMessage(res), sessionId);
       return;
     }
 
     const data = await res.json();
-    setMessages((prev) => [
+    updateSessionMessages(sessionId, (prev) => [
       ...prev,
       { role: "assistant", content: data.response, sources: data.sources },
     ]);
@@ -171,7 +209,18 @@ export default function ChatPage() {
     if (!input.trim()) return;
     const messageText = input;
     const userMsg: Message = { role: "user", content: messageText };
-    setMessages((prev) => [...prev, userMsg]);
+    const currentSessionId = activeSessionId;
+    const currentMessages =
+      sessionMessages[currentSessionId] || createInitialMessages();
+    const nextMessages = [...currentMessages, userMsg];
+    updateSessionMessages(currentSessionId, nextMessages);
+    setSessions((prev) =>
+      prev.map((session) =>
+        session.id === currentSessionId
+          ? { ...session, title: deriveSessionTitle(nextMessages) }
+          : session,
+      ),
+    );
     setInput("");
     setLoading(true);
     setStreaming(false);
@@ -194,7 +243,7 @@ export default function ChatPage() {
       resetStreamTimeout();
       const params = new URLSearchParams({
         message: messageText,
-        session_id: "default",
+        session_id: currentSessionId,
       });
       const res = await fetch(`${API_BASE}/api/chat/stream?${params}`, {
         signal: streamController.signal,
@@ -208,7 +257,7 @@ export default function ChatPage() {
         }
         setStreaming(false);
         setLoading(false);
-        await sendMessageFallback(messageText, res.status);
+        await sendMessageFallback(messageText, res.status, currentSessionId);
         return;
       }
 
@@ -219,7 +268,7 @@ export default function ChatPage() {
         }
         setStreaming(false);
         setLoading(false);
-        await sendMessageFallback(messageText);
+        await sendMessageFallback(messageText, undefined, currentSessionId);
         return;
       }
 
@@ -245,15 +294,15 @@ export default function ChatPage() {
           setStreaming(true);
           if (assistantIndex === null) {
             setLoading(false);
-            assistantIndex = messages.length + 1;
-            setMessages((prev) => [
+            assistantIndex = currentMessages.length + 1;
+            updateSessionMessages(currentSessionId, (prev) => [
               ...prev,
               { role: "assistant", content: event.content },
             ]);
             return false;
           }
 
-          setMessages((prev) =>
+          updateSessionMessages(currentSessionId, (prev) =>
             prev.map((msg, index) =>
               index === assistantIndex
                 ? { ...msg, content: msg.content + event.content }
@@ -265,7 +314,7 @@ export default function ChatPage() {
 
         if (event.type === "done") {
           if (assistantIndex !== null) {
-            setMessages((prev) =>
+            updateSessionMessages(currentSessionId, (prev) =>
               prev.map((msg, index) =>
                 index === assistantIndex
                   ? { ...msg, sources: event.sources }
@@ -288,7 +337,7 @@ export default function ChatPage() {
         }
         setStreaming(false);
         setLoading(false);
-        appendAssistantError(event.message);
+        appendAssistantError(event.message, currentSessionId);
         return true;
       };
 
@@ -315,7 +364,10 @@ export default function ChatPage() {
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
         if (streamTimedOut) {
-          appendAssistantError("La conexión tardó demasiado. Volvé a intentar en unos segundos.");
+          appendAssistantError(
+            "La conexión tardó demasiado. Volvé a intentar en unos segundos.",
+            currentSessionId,
+          );
         }
         return;
       }
@@ -324,7 +376,7 @@ export default function ChatPage() {
       if (streamControllerRef.current === streamController) {
         streamControllerRef.current = null;
       }
-      appendAssistantError(getErrorMessage());
+      appendAssistantError(getErrorMessage(), currentSessionId);
       setLoading(false);
       setStreaming(false);
     } finally {
@@ -341,7 +393,7 @@ export default function ChatPage() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    setMessages((prev) => [
+    updateActiveSessionMessages((prev) => [
       ...prev,
       {
         role: "assistant",
@@ -362,7 +414,7 @@ export default function ChatPage() {
         return;
       }
       const data = await res.json();
-      setMessages((prev) => [
+      updateActiveSessionMessages((prev) => [
         ...prev,
         {
           role: "assistant",
@@ -407,9 +459,18 @@ export default function ChatPage() {
             size="sm"
             onClick={() => {
               const newId = String(Date.now());
-              const newSession: Session = { id: newId, title: "Nueva sesion", active: true };
-              setSessions((prev) => prev.map((s) => ({ ...s, active: false })).concat(newSession));
-              setMessages(createInitialMessages());
+              const newSession: Session = {
+                id: newId,
+                title: "Nueva Sesion",
+                active: true,
+              };
+              setSessions((prev) =>
+                prev.map((s) => ({ ...s, active: false })).concat(newSession),
+              );
+              setSessionMessages((prev) => ({
+                ...prev,
+                [newId]: createInitialMessages(),
+              }));
             }}
             className="w-full justify-start gap-2 rounded-lg border-sidebar-border bg-[#151515]/70 text-sidebar-foreground hover:border-[#3ecf8e]/35 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
           >
@@ -423,6 +484,14 @@ export default function ChatPage() {
             {sessions.map((s) => (
               <button
                 key={s.id}
+                onClick={() => {
+                  setSessions((prev) =>
+                    prev.map((session) => ({
+                      ...session,
+                      active: session.id === s.id,
+                    })),
+                  );
+                }}
                 className={`
                   group flex w-[calc(100%-2px)] items-center gap-2 rounded-lg px-3 py-2 text-left text-sm
                   transition-all duration-200 hover:translate-x-0.5 hover:border-[#3ecf8e]/15 hover:shadow-[0_10px_22px_rgba(0,0,0,0.18)]
@@ -439,9 +508,11 @@ export default function ChatPage() {
                   className="size-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-60 hover:opacity-100"
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (s.active) {
-                      setMessages(createInitialMessages());
-                    }
+                    setSessionMessages((prev) => {
+                      const remainingMessages = { ...prev };
+                      delete remainingMessages[s.id];
+                      return remainingMessages;
+                    });
                     setSessions((prev) => {
                       const remaining = prev.filter((session) => session.id !== s.id);
 
