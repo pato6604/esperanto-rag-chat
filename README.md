@@ -1,6 +1,6 @@
 # 🗣️ Esperanto
 
-Un sistema RAG para chatear con documentos — en tu idioma.
+Un sistema RAG para chatear con documentos
 
 ## Stack
 
