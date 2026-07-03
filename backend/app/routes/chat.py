@@ -7,7 +7,13 @@ from fastapi.responses import StreamingResponse
 from openai import OpenAIError, RateLimitError
 
 from app import rag_engine
-from app.models import ChatRequest, ChatResponse, UploadResponse
+from app.models import (
+    ChatRequest,
+    ChatResponse,
+    DeleteSessionRequest,
+    DeleteSessionResponse,
+    UploadResponse,
+)
 
 router = APIRouter(prefix="/api", tags=["chat"])
 logger = logging.getLogger(__name__)
@@ -89,15 +95,21 @@ async def chat_stream(message: str, session_id: str = "default"):
 
 
 @router.post("/upload", response_model=UploadResponse)
-async def upload_file(file: UploadFile):
+async def upload_file(file: UploadFile, session_id: str = "default"):
     if not file.filename:
         raise HTTPException(status_code=400, detail="No se recibió ningún archivo")
     data = await file.read()
     try:
-        chunks = rag_engine.ingest_bytes(data, file.filename)
+        chunks = rag_engine.ingest_bytes(data, file.filename, session_id)
     except ValueError as exc:
         logger.exception("Error al subir documento")
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except OpenAIError as exc:
         _raise_openai_http_error(exc)
     return UploadResponse(filename=file.filename, chunks=chunks, status="indexed")
+
+
+@router.post("/sessions/delete", response_model=DeleteSessionResponse)
+async def delete_session(body: DeleteSessionRequest):
+    deleted = rag_engine.delete_session_chunks(body.session_id)
+    return DeleteSessionResponse(deleted_chunks=deleted, session_id=body.session_id)

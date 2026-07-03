@@ -405,7 +405,8 @@ export default function ChatPage() {
     form.append("file", file);
 
     try {
-      const res = await fetch(`${API_BASE}/api/upload`, {
+      const params = new URLSearchParams({ session_id: activeSessionId });
+      const res = await fetch(`${API_BASE}/api/upload?${params}`, {
         method: "POST",
         body: form,
       });
@@ -529,6 +530,11 @@ export default function ChatPage() {
                         active: index === 0,
                       }));
                     });
+                    fetch(`${API_BASE}/api/sessions/delete`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ session_id: s.id }),
+                    }).catch(() => {});
                   }}
                 />
               </button>

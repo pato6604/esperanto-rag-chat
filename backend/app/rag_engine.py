@@ -8,7 +8,24 @@ from uuid import uuid4
 
 from openai import OpenAI, RateLimitError
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams, PointStruct
+from qdrant_client.models import (
+    Distance,
+    FieldCondition,
+    Filter,
+    FilterSelector,
+    Fusion,
+    FusionQuery,
+    KeywordIndexParams,
+    KeywordIndexType,
+    MatchText,
+    MatchValue,
+    PointStruct,
+    Prefetch,
+    TextIndexParams,
+    TextIndexType,
+    TokenizerType,
+    VectorParams,
+)
 
 from app.config import settings
 
@@ -69,7 +86,45 @@ def _ensure_collection(client: QdrantClient) -> None:
         client.create_collection(
             collection_name=settings.collection_name,
             vectors_config=VectorParams(size=settings.vector_dim, distance=Distance.COSINE),
+            on_disk_payload=True,
         )
+    collection_info = client.get_collection(settings.collection_name)
+    payload_schema = collection_info.payload_schema or {}
+
+    if "text" not in payload_schema:
+        client.create_payload_index(
+            collection_name=settings.collection_name,
+            field_name="text",
+            field_schema=TextIndexParams(
+                type=TextIndexType.TEXT,
+                tokenizer=TokenizerType.WORD,
+                min_token_len=2,
+                max_token_len=20,
+                lowercase=True,
+            ),
+        )
+
+    if "session_id" not in payload_schema:
+        client.create_payload_index(
+            collection_name=settings.collection_name,
+            field_name="session_id",
+            field_schema=KeywordIndexParams(type=KeywordIndexType.KEYWORD),
+        )
+
+
+def _session_filter(session_id: str) -> Filter:
+    return Filter(
+        must=[FieldCondition(key="session_id", match=MatchValue(value=session_id))]
+    )
+
+
+def _session_text_filter(session_id: str, text: str) -> Filter:
+    return Filter(
+        must=[
+            FieldCondition(key="session_id", match=MatchValue(value=session_id)),
+            FieldCondition(key="text", match=MatchText(text=text)),
+        ]
+    )
 
 
 def _chunk_text(text: str) -> list[str]:
@@ -103,7 +158,7 @@ def init_rag() -> None:
     _ensure_collection(client)
 
 
-def ingest_bytes(data: bytes, filename: str) -> int:
+def ingest_bytes(data: bytes, filename: str, session_id: str = "default") -> int:
     """Ingest a document. Returns chunk count."""
     init_rag()
     client = _get_qdrant()
@@ -128,9 +183,6 @@ def ingest_bytes(data: bytes, filename: str) -> int:
 
     chunks = _chunk_text(text)
 
-    client.delete_collection(collection_name=settings.collection_name)
-    _ensure_collection(client)
-
     # Get embeddings from Gemini via OpenAI-compatible endpoint
     embeddings = []
     for start in range(0, len(chunks), 100):
@@ -153,6 +205,7 @@ def ingest_bytes(data: bytes, filename: str) -> int:
                 "text": chunk,
                 "source": filename,
                 "chunk_index": i,
+                "session_id": session_id,
             },
         ))
     client.upsert(collection_name=settings.collection_name, points=points)
@@ -175,10 +228,24 @@ def chat(message: str, session_id: str = "default") -> tuple[str, list[str]]:
     )
     query_vector = resp.data[0].embedding
 
+    query_filter = _session_filter(session_id)
+
     # Search Qdrant
     search_result = client.query_points(
         collection_name=settings.collection_name,
-        query=query_vector,
+        prefetch=[
+            Prefetch(
+                query=query_vector,
+                using="",
+                limit=settings.top_k * 3,
+                filter=query_filter,
+            ),
+            Prefetch(
+                limit=settings.top_k * 3,
+                filter=_session_text_filter(session_id, message),
+            ),
+        ],
+        query=FusionQuery(fusion=Fusion.RRF),
         limit=settings.top_k,
     ).points
 
@@ -239,10 +306,24 @@ async def chat_stream(
     )
     query_vector = resp.data[0].embedding
 
+    query_filter = _session_filter(session_id)
+
     # Search Qdrant
     search_result = client.query_points(
         collection_name=settings.collection_name,
-        query=query_vector,
+        prefetch=[
+            Prefetch(
+                query=query_vector,
+                using="",
+                limit=settings.top_k * 3,
+                filter=query_filter,
+            ),
+            Prefetch(
+                limit=settings.top_k * 3,
+                filter=_session_text_filter(session_id, message),
+            ),
+        ],
+        query=FusionQuery(fusion=Fusion.RRF),
         limit=settings.top_k,
     ).points
 
@@ -285,3 +366,26 @@ async def chat_stream(
             yield {"type": "chunk", "content": content}
 
     yield {"type": "done", "sources": sources}
+
+
+def delete_session_chunks(session_id: str) -> int:
+    """Delete all indexed chunks for one chat session and return the chunk count."""
+    init_rag()
+    client = _get_qdrant()
+    query_filter = _session_filter(session_id)
+
+    # Count matching points efficiently
+    count_result = client.count(
+        collection_name=settings.collection_name,
+        count_filter=query_filter,
+        exact=True,
+    )
+    deleted_count = count_result.count
+
+    if deleted_count:
+        client.delete(
+            collection_name=settings.collection_name,
+            points_selector=FilterSelector(filter=query_filter),
+        )
+
+    return deleted_count
