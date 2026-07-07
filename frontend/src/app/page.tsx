@@ -44,20 +44,17 @@ type BackendSession = {
   total_chunks?: number;
 };
 
-const DEFAULT_SESSION: Session = {
-  id: "default",
-  title: "Nueva Sesion",
-  active: true,
-};
+const EMPTY_MESSAGES: Message[] = [];
 
-function createInitialMessages(): Message[] {
-  return [
-    {
-      role: "assistant",
-      content:
-        "Hola. Soy tu asistente Esperanto. Subi documentos y preguntame lo que quieras.",
-    },
-  ];
+function createSessionId() {
+  return String(Date.now());
+}
+
+function hasSessionDocuments(session: Pick<Session, "documents" | "totalChunks">) {
+  return Boolean(
+    (session.documents && session.documents.length > 0) ||
+      (session.totalChunks && session.totalChunks > 0),
+  );
 }
 
 function deriveSessionTitle(messages: Message[]): string {
@@ -74,9 +71,7 @@ function deriveSessionTitle(messages: Message[]): string {
 export default function ChatPage() {
   const [sessionMessages, setSessionMessages] = useState<
     Record<string, Message[]>
-  >({
-    default: createInitialMessages(),
-  });
+  >({});
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [streaming, setStreaming] = useState(false);
@@ -87,19 +82,20 @@ export default function ChatPage() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const streamControllerRef = useRef<AbortController | null>(null);
-  const [sessions, setSessions] = useState<Session[]>([DEFAULT_SESSION]);
+  const [sessions, setSessions] = useState<Session[]>([]);
   const [editingTitle, setEditingTitle] = useState(false);
   const [editTitleValue, setEditTitleValue] = useState("");
 
   const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
   const activeSession = sessions.find((session) => session.active);
-  const activeSessionId =
-    activeSession?.id || DEFAULT_SESSION.id;
-  const activeSessionTitle =
-    activeSession?.title || DEFAULT_SESSION.title;
+  const activeSessionId = activeSession?.id;
+  const activeSessionTitle = activeSession?.title || "Carga tu documento";
   const activeSessionDocuments = activeSession?.documents || [];
   const activeSessionTotalChunks = activeSession?.totalChunks || 0;
-  const messages = sessionMessages[activeSessionId] || createInitialMessages();
+  const messages = activeSessionId
+    ? sessionMessages[activeSessionId] || EMPTY_MESSAGES
+    : EMPTY_MESSAGES;
+  const showEmptyState = !activeSession;
 
   const fetchSessionData = useCallback(() => {
     fetch(`${API_BASE}/api/sessions`)
@@ -107,17 +103,19 @@ export default function ChatPage() {
       .then((data) => {
         if (data && Array.isArray(data)) {
           setSessions((prev) => {
-            const currentActiveId =
-              prev.find((session) => session.active)?.id || DEFAULT_SESSION.id;
-            const backendSessions: Session[] = data.map(
-              (session: BackendSession) => ({
+            const currentActiveId = prev.find((session) => session.active)?.id;
+            const backendSessions: Session[] = data
+              .map((session: BackendSession) => ({
                 id: session.id,
                 title: session.title,
                 active: session.id === currentActiveId,
                 documents: session.documents,
                 totalChunks: session.total_chunks,
-              }),
-            );
+              }))
+              .filter(
+                (session) =>
+                  session.id !== "default" && hasSessionDocuments(session),
+              );
 
             const backendSessionIds = new Set(
               backendSessions.map((session) => session.id),
@@ -135,7 +133,7 @@ export default function ChatPage() {
               mergedSessions[0].active = true;
             }
 
-            return mergedSessions.length > 0 ? mergedSessions : prev;
+            return mergedSessions;
           });
         }
       })
@@ -149,7 +147,7 @@ export default function ChatPage() {
     updater: Message[] | ((prev: Message[]) => Message[]),
   ) {
     setSessionMessages((prev) => {
-      const currentMessages = prev[sessionId] || createInitialMessages();
+      const currentMessages = prev[sessionId] || [];
       const nextMessages =
         typeof updater === "function" ? updater(currentMessages) : updater;
 
@@ -160,13 +158,30 @@ export default function ChatPage() {
     });
   }
 
-  function updateActiveSessionMessages(
-    updater: Message[] | ((prev: Message[]) => Message[]),
-  ) {
-    updateSessionMessages(activeSessionId, updater);
+  function createLocalSession(newId: string, title = "Nueva Sesion") {
+    const newSession: Session = {
+      id: newId,
+      title,
+      active: true,
+    };
+
+    setSessions((prev) =>
+      prev.map((session) => ({ ...session, active: false })).concat(newSession),
+    );
+    setSessionMessages((prev) => ({
+      ...prev,
+      [newId]: [],
+    }));
+
+    return newId;
   }
 
   function handleTitleSave() {
+    if (!activeSessionId) {
+      setEditingTitle(false);
+      return;
+    }
+
     const newTitle = editTitleValue.trim();
     if (newTitle && newTitle !== activeSessionTitle) {
       setSessions((prev) =>
@@ -230,6 +245,8 @@ export default function ChatPage() {
   }
 
   function appendAssistantError(content: string, sessionId = activeSessionId) {
+    if (!sessionId) return;
+
     const visibleContent = content.toLowerCase().includes("gemini")
       ? `Atención: ${content.replace(/^Atención:\s*/i, "")}`
       : content;
@@ -261,6 +278,8 @@ export default function ChatPage() {
     status?: number,
     sessionId = activeSessionId,
   ) {
+    if (!sessionId) return;
+
     if (status && [400, 429, 502, 503].includes(status)) {
       appendAssistantError(getErrorMessage(status), sessionId);
       return;
@@ -288,9 +307,9 @@ export default function ChatPage() {
     if (!input.trim()) return;
     const messageText = input;
     const userMsg: Message = { role: "user", content: messageText };
-    const currentSessionId = activeSessionId;
-    const currentMessages =
-      sessionMessages[currentSessionId] || createInitialMessages();
+    const currentSessionId =
+      activeSessionId || createLocalSession(createSessionId());
+    const currentMessages = sessionMessages[currentSessionId] || [];
     const nextMessages = [...currentMessages, userMsg];
     updateSessionMessages(currentSessionId, nextMessages);
     setSessions((prev) =>
@@ -471,9 +490,10 @@ export default function ChatPage() {
   async function handleFileUpload(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    const currentSessionId = activeSessionId;
+    const currentSessionId =
+      activeSessionId || createLocalSession(createSessionId(), file.name);
 
-    updateActiveSessionMessages((prev) => [
+    updateSessionMessages(currentSessionId, (prev) => [
       ...prev,
       {
         role: "assistant",
@@ -491,11 +511,11 @@ export default function ChatPage() {
         body: form,
       });
       if (!res.ok) {
-        appendAssistantError(await getResponseErrorMessage(res));
+        appendAssistantError(await getResponseErrorMessage(res), currentSessionId);
         return;
       }
       const data = await res.json();
-      updateActiveSessionMessages((prev) => [
+      updateSessionMessages(currentSessionId, (prev) => [
         ...prev,
         {
           role: "assistant",
@@ -511,7 +531,7 @@ export default function ChatPage() {
       );
       fetchSessionData();
     } catch {
-      appendAssistantError(getErrorMessage());
+      appendAssistantError(getErrorMessage(), currentSessionId);
     }
 
     if (fileInputRef.current) fileInputRef.current.value = "";
@@ -547,19 +567,7 @@ export default function ChatPage() {
             variant="outline"
             size="sm"
             onClick={() => {
-              const newId = String(Date.now());
-              const newSession: Session = {
-                id: newId,
-                title: "Nueva Sesion",
-                active: true,
-              };
-              setSessions((prev) =>
-                prev.map((s) => ({ ...s, active: false })).concat(newSession),
-              );
-              setSessionMessages((prev) => ({
-                ...prev,
-                [newId]: createInitialMessages(),
-              }));
+              createLocalSession(createSessionId());
             }}
             className="w-full justify-start gap-2 rounded-lg border-sidebar-border bg-[#151515]/70 text-sidebar-foreground hover:border-[#3ecf8e]/35 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
           >
@@ -618,10 +626,6 @@ export default function ChatPage() {
 
                       if (!s.active) {
                         return remaining;
-                      }
-
-                      if (remaining.length === 0) {
-                        return [DEFAULT_SESSION];
                       }
 
                       return remaining.map((session, index) => ({
@@ -761,66 +765,90 @@ export default function ChatPage() {
         <div className="flex-1 overflow-hidden">
           <ScrollArea className="h-full">
             <div className="mx-auto max-w-4xl px-8 py-8">
-              <div className="space-y-4">
-                {messages.map((m, i) => (
-                  <div
-                    key={i}
-                    className={`message-enter flex ${
-                      m.role === "user" ? "justify-end" : "justify-start"
-                    }`}
-                  >
-                    <div
-                      className={`
-                        max-w-[82%] rounded-3xl px-4 py-2.5 text-sm leading-relaxed shadow-[0_12px_32px_rgba(0,0,0,0.22)]
-                        ${
-                          m.role === "user"
-                            ? "bg-[#3ecf8e] text-[#0f0f0f] shadow-[0_14px_34px_rgba(62,207,142,0.14)]"
-                            : m.error
-                              ? "error-message text-[#fafafa]"
-                            : "glass-panel gradient-border text-[#fafafa]"
-                        }
-                      `}
+              {showEmptyState ? (
+                <div className="flex min-h-[calc(100dvh-12rem)] items-center justify-center">
+                  <div className="flex max-w-md flex-col items-center text-center">
+                    <div className="mb-6 flex size-20 items-center justify-center rounded-2xl border border-[#3ecf8e]/25 bg-[#151515]/80 shadow-[0_18px_48px_rgba(0,0,0,0.3)]">
+                      <Upload className="size-10 text-[#3ecf8e]" />
+                    </div>
+                    <h2 className="text-2xl font-semibold text-[#3ecf8e]">
+                      Carga tu documento
+                    </h2>
+                    <p className="mt-3 text-sm leading-6 text-muted-foreground">
+                      Subí un PDF, TXT, DOCX, CSV, JSON o HTML para empezar a consultar.
+                    </p>
+                    <Button
+                      variant="outline"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="mt-6 gap-2 rounded-lg border-[#3ecf8e]/35 bg-[#151515]/70 text-foreground hover:bg-sidebar-accent"
                     >
-                      <div className="flex items-start gap-2">
-                        {m.error && (
-                          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-[#ef4444]" />
-                        )}
-                        <p className="whitespace-pre-wrap">{m.content}</p>
-                      </div>
-                      {m.sources && m.sources.length > 0 && (
-                        <div className="mt-2 flex flex-wrap gap-1.5 border-t border-[#2e2e2e] pt-2">
-                          {m.sources.map((src, j) => (
-                            <span
-                              key={j}
-                              className="inline-flex items-center gap-1 rounded-full border border-[#3ecf8e]/30 bg-[#0f0f0f] px-2 py-0.5 text-[10px] font-medium text-[#3ecf8e]"
-                            >
-                              <FileText className="size-3" />
-                              {src}
-                            </span>
-                          ))}
+                      <Upload className="size-4" />
+                      Subir documento
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {messages.map((m, i) => (
+                    <div
+                      key={i}
+                      className={`message-enter flex ${
+                        m.role === "user" ? "justify-end" : "justify-start"
+                      }`}
+                    >
+                      <div
+                        className={`
+                          max-w-[82%] rounded-3xl px-4 py-2.5 text-sm leading-relaxed shadow-[0_12px_32px_rgba(0,0,0,0.22)]
+                          ${
+                            m.role === "user"
+                              ? "bg-[#3ecf8e] text-[#0f0f0f] shadow-[0_14px_34px_rgba(62,207,142,0.14)]"
+                              : m.error
+                                ? "error-message text-[#fafafa]"
+                              : "glass-panel gradient-border text-[#fafafa]"
+                          }
+                        `}
+                      >
+                        <div className="flex items-start gap-2">
+                          {m.error && (
+                            <AlertTriangle className="mt-0.5 size-4 shrink-0 text-[#ef4444]" />
+                          )}
+                          <p className="whitespace-pre-wrap">{m.content}</p>
                         </div>
-                      )}
-                    </div>
-                  </div>
-                ))}
-
-                {(loading || streaming) && (
-                  <div className="message-enter flex justify-start">
-                    <div className="glass-panel gradient-border rounded-2xl px-4 py-3">
-                      <div className="flex items-center gap-2 text-muted-foreground">
-                        <span className="typing-dot size-2 rounded-full bg-[#3ecf8e]" />
-                        <span className="typing-dot size-2 rounded-full bg-[#3ecf8e]" />
-                        <span className="typing-dot size-2 rounded-full bg-[#3ecf8e]" />
-                        <span className="ml-1 text-sm">
-                          {streaming ? "Respondiendo..." : "Pensando..."}
-                        </span>
+                        {m.sources && m.sources.length > 0 && (
+                          <div className="mt-2 flex flex-wrap gap-1.5 border-t border-[#2e2e2e] pt-2">
+                            {m.sources.map((src, j) => (
+                              <span
+                                key={j}
+                                className="inline-flex items-center gap-1 rounded-full border border-[#3ecf8e]/30 bg-[#0f0f0f] px-2 py-0.5 text-[10px] font-medium text-[#3ecf8e]"
+                              >
+                                <FileText className="size-3" />
+                                {src}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     </div>
-                  </div>
-                )}
+                  ))}
 
-                <div ref={scrollRef} />
-              </div>
+                  {(loading || streaming) && (
+                    <div className="message-enter flex justify-start">
+                      <div className="glass-panel gradient-border rounded-2xl px-4 py-3">
+                        <div className="flex items-center gap-2 text-muted-foreground">
+                          <span className="typing-dot size-2 rounded-full bg-[#3ecf8e]" />
+                          <span className="typing-dot size-2 rounded-full bg-[#3ecf8e]" />
+                          <span className="typing-dot size-2 rounded-full bg-[#3ecf8e]" />
+                          <span className="ml-1 text-sm">
+                            {streaming ? "Respondiendo..." : "Pensando..."}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div ref={scrollRef} />
+                </div>
+              )}
             </div>
           </ScrollArea>
         </div>
@@ -838,7 +866,11 @@ export default function ChatPage() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Preguntale a tus documentos..."
+                placeholder={
+                  activeSessionDocuments.length > 0
+                    ? "Preguntale a tus documentos..."
+                    : "Subí un documento para empezar"
+                }
                 disabled={loading}
                 className="h-auto min-h-5 border-0 bg-transparent px-1 text-sm shadow-none placeholder:text-muted-foreground focus-visible:ring-0"
               />
