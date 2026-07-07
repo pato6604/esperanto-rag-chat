@@ -139,14 +139,55 @@ def _chunk_text(text: str) -> list[str]:
 
 
 def _extract_text(file_path: str) -> str:
-    """Extract text from a file. Supports PDF, TXT, MD."""
+    """Extract text from a file. Supports PDF, DOCX, CSV, JSON, HTML, TXT, MD.
+    
+    For .json files, returns a pretty-printed serialized representation.
+    """
     ext = Path(file_path).suffix.lower()
     if ext == ".pdf":
-        from pypdf import PdfReader
-        reader = PdfReader(file_path)
-        return "\n".join(page.extract_text() or "" for page in reader.pages)
+        try:
+            from pypdf import PdfReader, PdfReadError
+            reader = PdfReader(file_path)
+            return "\n".join(page.extract_text() or "" for page in reader.pages)
+        except PdfReadError:
+            return ""
+    elif ext == ".docx":
+        try:
+            from docx import Document
+            doc = Document(file_path)
+            return "\n".join(p.text for p in doc.paragraphs)
+        except Exception:
+            return ""
+    elif ext == ".csv":
+        import csv
+        try:
+            with open(file_path, newline="", encoding="utf-8") as f:
+                reader = csv.reader(f)
+                rows = [", ".join(row) for row in reader]
+            return "\n".join(rows)
+        except (UnicodeDecodeError, csv.Error):
+            return ""
+    elif ext == ".json":
+        import json
+        try:
+            with open(file_path, encoding="utf-8") as f:
+                data = json.load(f)
+            return json.dumps(data, indent=2, ensure_ascii=False)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return ""
+    elif ext == ".html":
+        from bs4 import BeautifulSoup
+        try:
+            html_content = Path(file_path).read_text(encoding="utf-8")
+            soup = BeautifulSoup(html_content, "lxml")
+            return soup.get_text(separator="\n", strip=True)
+        except (UnicodeDecodeError, Exception):
+            return ""
     else:
-        return Path(file_path).read_text(encoding="utf-8")
+        try:
+            return Path(file_path).read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            return ""
 
 
 # ── Public API ───────────────────────────────────────────────────────
