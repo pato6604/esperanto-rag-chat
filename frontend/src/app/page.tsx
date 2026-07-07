@@ -3,6 +3,7 @@
 import {
   type ChangeEvent,
   type KeyboardEvent as ReactKeyboardEvent,
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -32,6 +33,8 @@ type Session = {
   id: string;
   title: string;
   active: boolean;
+  documents?: { filename: string; chunks: number }[];
+  totalChunks?: number;
 };
 
 const DEFAULT_SESSION: Session = {
@@ -78,13 +81,48 @@ export default function ChatPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const streamControllerRef = useRef<AbortController | null>(null);
   const [sessions, setSessions] = useState<Session[]>([DEFAULT_SESSION]);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [editTitleValue, setEditTitleValue] = useState("");
 
   const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  const activeSession = sessions.find((session) => session.active);
   const activeSessionId =
-    sessions.find((session) => session.active)?.id || DEFAULT_SESSION.id;
+    activeSession?.id || DEFAULT_SESSION.id;
   const activeSessionTitle =
-    sessions.find((session) => session.active)?.title || DEFAULT_SESSION.title;
+    activeSession?.title || DEFAULT_SESSION.title;
+  const activeSessionDocuments = activeSession?.documents || [];
+  const activeSessionTotalChunks = activeSession?.totalChunks || 0;
   const messages = sessionMessages[activeSessionId] || createInitialMessages();
+
+  const fetchSessionData = useCallback(() => {
+    fetch(`${API_BASE}/api/sessions`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data && Array.isArray(data)) {
+          setSessions((prev) => {
+            const currentActiveId =
+              prev.find((session) => session.active)?.id || DEFAULT_SESSION.id;
+            const backendSessions = data.map((session: any) => ({
+              id: session.id,
+              title: session.title,
+              active: session.id === currentActiveId,
+              documents: session.documents,
+              totalChunks: session.total_chunks,
+            }));
+
+            const hasActive = backendSessions.some((session: Session) => session.active);
+            if (!hasActive && backendSessions.length > 0) {
+              backendSessions[0].active = true;
+            }
+
+            return backendSessions.length > 0 ? backendSessions : prev;
+          });
+        }
+      })
+      .catch(() => {
+        // Si falla, mantener el estado local sin romper la app.
+      });
+  }, [API_BASE]);
 
   function updateSessionMessages(
     sessionId: string,
@@ -107,6 +145,27 @@ export default function ChatPage() {
   ) {
     updateSessionMessages(activeSessionId, updater);
   }
+
+  function handleTitleSave() {
+    const newTitle = editTitleValue.trim();
+    if (newTitle && newTitle !== activeSessionTitle) {
+      setSessions((prev) =>
+        prev.map((session) =>
+          session.id === activeSessionId ? { ...session, title: newTitle } : session,
+        ),
+      );
+      fetch(`${API_BASE}/api/sessions/${activeSessionId}/title`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: newTitle }),
+      }).catch(() => {});
+    }
+    setEditingTitle(false);
+  }
+
+  useEffect(() => {
+    fetchSessionData();
+  }, [fetchSessionData]);
 
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -216,7 +275,7 @@ export default function ChatPage() {
     updateSessionMessages(currentSessionId, nextMessages);
     setSessions((prev) =>
       prev.map((session) =>
-        session.id === currentSessionId
+        session.id === currentSessionId && session.title === "Nueva Sesion"
           ? { ...session, title: deriveSessionTitle(nextMessages) }
           : session,
       ),
@@ -392,6 +451,7 @@ export default function ChatPage() {
   async function handleFileUpload(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+    const currentSessionId = activeSessionId;
 
     updateActiveSessionMessages((prev) => [
       ...prev,
@@ -405,7 +465,7 @@ export default function ChatPage() {
     form.append("file", file);
 
     try {
-      const params = new URLSearchParams({ session_id: activeSessionId });
+      const params = new URLSearchParams({ session_id: currentSessionId });
       const res = await fetch(`${API_BASE}/api/upload?${params}`, {
         method: "POST",
         body: form,
@@ -422,6 +482,14 @@ export default function ChatPage() {
           content: `"${data.filename}" indexado (${data.chunks} chunks).`,
         },
       ]);
+      setSessions((prev) =>
+        prev.map((session) =>
+          session.id === currentSessionId && session.title === "Nueva Sesion"
+            ? { ...session, title: file.name }
+            : session,
+        ),
+      );
+      fetchSessionData();
     } catch {
       appendAssistantError(getErrorMessage());
     }
@@ -504,6 +572,17 @@ export default function ChatPage() {
                 `}
               >
                 <MessageSquare className="size-4 shrink-0" />
+                {s.totalChunks && s.totalChunks > 0 ? (
+                  <span
+                    className="ml-0.5 size-2 shrink-0 rounded-full bg-[#3ecf8e]"
+                    title="Tiene documentos"
+                  />
+                ) : (
+                  <span
+                    className="ml-0.5 size-2 shrink-0 rounded-full bg-[#2e2e2e]"
+                    title="Sin documentos"
+                  />
+                )}
                 <span className="min-w-0 flex-1 truncate">{s.title}</span>
                 <Trash2
                   className="size-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-60 hover:opacity-100"
@@ -544,7 +623,8 @@ export default function ChatPage() {
 
         <div className="border-t border-sidebar-border/80 p-3">
           <p className="text-xs text-sidebar-foreground/50">
-            {sessions.length} sesiones
+            {sessions.length} sesiones ·{" "}
+            {sessions.reduce((sum, session) => sum + (session.totalChunks || 0), 0)} chunks
           </p>
         </div>
       </aside>
@@ -559,9 +639,30 @@ export default function ChatPage() {
             >
               <PanelLeft className="size-5" />
             </button>
-            <h1 className="truncate text-base font-semibold">
-              {activeSessionTitle}
-            </h1>
+            {editingTitle ? (
+              <Input
+                value={editTitleValue}
+                onChange={(e) => setEditTitleValue(e.target.value)}
+                onBlur={handleTitleSave}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleTitleSave();
+                  if (e.key === "Escape") setEditingTitle(false);
+                }}
+                autoFocus
+                className="h-7 w-64 border-border bg-[#151515] text-base font-semibold"
+              />
+            ) : (
+              <h1
+                className="cursor-pointer truncate text-base font-semibold transition-colors hover:text-[#3ecf8e]"
+                onDoubleClick={() => {
+                  setEditTitleValue(activeSessionTitle);
+                  setEditingTitle(true);
+                }}
+                title="Doble clic para renombrar"
+              >
+                {activeSessionTitle}
+              </h1>
+            )}
             <span
               className="inline-flex items-center rounded-full px-1"
               title={
@@ -611,6 +712,31 @@ export default function ChatPage() {
             </Button>
           </div>
         </header>
+
+        {/* Vista general de la sesion activa */}
+        {activeSessionDocuments.length > 0 && (
+          <div className="border-b border-border/80 bg-[#0f0f0f]/40 px-8 py-3">
+            <div className="mx-auto max-w-4xl">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs text-muted-foreground">
+                    {activeSessionDocuments.length} documentos · {activeSessionTotalChunks} chunks
+                  </p>
+                </div>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {activeSessionDocuments.map((doc, i) => (
+                  <span
+                    key={`${doc.filename}-${i}`}
+                    className="inline-flex items-center gap-1 rounded-full border border-[#3ecf8e]/25 bg-[#0f0f0f] px-2.5 py-1 text-xs text-[#3ecf8e]"
+                  >
+                    {doc.filename} · {doc.chunks} chunks
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="flex-1 overflow-hidden">
           <ScrollArea className="h-full">

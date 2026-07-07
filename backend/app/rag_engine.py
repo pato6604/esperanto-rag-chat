@@ -3,6 +3,7 @@ import tempfile
 import os
 import time
 from pathlib import Path
+from datetime import datetime
 from collections.abc import AsyncGenerator
 from uuid import uuid4
 
@@ -28,6 +29,10 @@ from qdrant_client.models import (
 )
 
 from app.config import settings
+
+
+# Ruta del archivo de metadata de sesiones, junto a la base local de Qdrant.
+SESSIONS_DATA_PATH = Path(settings.qdrant_path) / "sessions_data.json"
 
 
 def _call_with_retry(fn, max_retries=3, base_delay=5):
@@ -127,6 +132,81 @@ def _session_text_filter(session_id: str, text: str) -> Filter:
     )
 
 
+def _now_iso() -> str:
+    """Devuelve la fecha actual en formato ISO sin zona horaria."""
+    return datetime.now().isoformat(timespec="seconds")
+
+
+def _load_sessions_data() -> dict:
+    """Carga sessions_data.json, devuelve {} si no existe."""
+    if not SESSIONS_DATA_PATH.exists():
+        return {}
+
+    try:
+        return json.loads(SESSIONS_DATA_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _save_sessions_data(data: dict) -> None:
+    """Guarda sessions_data.json."""
+    SESSIONS_DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
+    SESSIONS_DATA_PATH.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _auto_session_title(session_id: str, documents: list[dict] | None = None) -> str:
+    """Genera un titulo simple para una sesion."""
+    if documents:
+        first_filename = documents[0].get("filename")
+        if first_filename:
+            return str(first_filename)
+
+    short_id = session_id[:8] if session_id else "default"
+    return f"Sesion {short_id}"
+
+
+def _scroll_all_points(scroll_filter: Filter | None = None) -> list:
+    """Scrollea todos los puntos de Qdrant."""
+    init_rag()
+    client = _get_qdrant()
+    points = []
+    next_offset = None
+
+    while True:
+        batch, next_offset = client.scroll(
+            collection_name=settings.collection_name,
+            scroll_filter=scroll_filter,
+            limit=10000,
+            with_payload=True,
+            with_vectors=False,
+            offset=next_offset,
+        )
+        points.extend(batch)
+        if next_offset is None:
+            break
+
+    return points
+
+
+def _documents_from_points(points: list) -> tuple[list[dict], int]:
+    """Agrupa puntos por archivo y cuenta chunks."""
+    chunks_by_filename: dict[str, int] = {}
+
+    for point in points:
+        payload = point.payload or {}
+        filename = payload.get("source") or "sin_nombre"
+        chunks_by_filename[str(filename)] = chunks_by_filename.get(str(filename), 0) + 1
+
+    documents = [
+        {"filename": filename, "chunks": chunks}
+        for filename, chunks in sorted(chunks_by_filename.items())
+    ]
+    return documents, len(points)
+
+
 def _chunk_text(text: str) -> list[str]:
     """Simple chunking by character count with overlap."""
     chunks = []
@@ -199,6 +279,126 @@ def init_rag() -> None:
     _ensure_collection(client)
 
 
+def get_all_sessions() -> list[dict]:
+    """
+    Scrollea todos los puntos en Qdrant, agrupa por session_id y combina
+    la informacion con sessions_data.json.
+    """
+    points = _scroll_all_points()
+    grouped_points: dict[str, list] = {}
+
+    for point in points:
+        payload = point.payload or {}
+        session_id = str(payload.get("session_id") or "default")
+        grouped_points.setdefault(session_id, []).append(point)
+
+    sessions_data = _load_sessions_data()
+    now = _now_iso()
+    sessions: list[dict] = []
+    data_changed = False
+
+    for session_id, session_points in grouped_points.items():
+        documents, total_chunks = _documents_from_points(session_points)
+        current_data = sessions_data.get(session_id)
+
+        if not isinstance(current_data, dict):
+            current_data = {
+                "title": _auto_session_title(session_id, documents),
+                "created_at": now,
+                "last_updated": now,
+            }
+            sessions_data[session_id] = current_data
+            data_changed = True
+        else:
+            if not current_data.get("title"):
+                current_data["title"] = _auto_session_title(session_id, documents)
+                data_changed = True
+            if not current_data.get("created_at"):
+                current_data["created_at"] = now
+                data_changed = True
+            if not current_data.get("last_updated"):
+                current_data["last_updated"] = now
+                data_changed = True
+
+        sessions.append(
+            {
+                "id": session_id,
+                "title": current_data["title"],
+                "documents": documents,
+                "total_chunks": total_chunks,
+                "last_updated": current_data["last_updated"],
+            }
+        )
+
+    if data_changed:
+        _save_sessions_data(sessions_data)
+
+    return sorted(
+        sessions,
+        key=lambda session: session.get("last_updated", ""),
+        reverse=True,
+    )
+
+
+def get_session_title(session_id: str) -> str:
+    """Devuelve el titulo guardado o auto-genera uno."""
+    sessions_data = _load_sessions_data()
+    session_data = sessions_data.get(session_id)
+    if isinstance(session_data, dict) and session_data.get("title"):
+        return str(session_data["title"])
+
+    documents_data = get_session_documents(session_id)
+    return _auto_session_title(session_id, documents_data["documents"])
+
+
+def set_session_title(session_id: str, title: str) -> None:
+    """Guarda el titulo en sessions_data.json."""
+    sessions_data = _load_sessions_data()
+    now = _now_iso()
+    current_data = sessions_data.get(session_id)
+
+    if not isinstance(current_data, dict):
+        current_data = {
+            "created_at": now,
+        }
+
+    current_data["title"] = title
+    current_data["last_updated"] = now
+    sessions_data[session_id] = current_data
+    _save_sessions_data(sessions_data)
+
+
+def _touch_session(session_id: str, fallback_title: str | None = None) -> None:
+    """Actualiza la metadata basica de una sesion."""
+    sessions_data = _load_sessions_data()
+    now = _now_iso()
+    current_data = sessions_data.get(session_id)
+
+    if not isinstance(current_data, dict):
+        current_data = {
+            "title": fallback_title or _auto_session_title(session_id),
+            "created_at": now,
+        }
+
+    if not current_data.get("title"):
+        current_data["title"] = fallback_title or _auto_session_title(session_id)
+    if not current_data.get("created_at"):
+        current_data["created_at"] = now
+    current_data["last_updated"] = now
+    sessions_data[session_id] = current_data
+    _save_sessions_data(sessions_data)
+
+
+def get_session_documents(session_id: str) -> dict:
+    """
+    Scrollea puntos de una sesion especifica.
+    Devuelve: { documents: [{filename, chunks}], total_chunks }
+    """
+    points = _scroll_all_points(_session_filter(session_id))
+    documents, total_chunks = _documents_from_points(points)
+    return {"documents": documents, "total_chunks": total_chunks}
+
+
 def ingest_bytes(data: bytes, filename: str, session_id: str = "default") -> int:
     """Ingest a document. Returns chunk count."""
     init_rag()
@@ -250,6 +450,7 @@ def ingest_bytes(data: bytes, filename: str, session_id: str = "default") -> int
             },
         ))
     client.upsert(collection_name=settings.collection_name, points=points)
+    _touch_session(session_id, filename)
 
     return len(chunks)
 
