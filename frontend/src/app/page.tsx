@@ -37,6 +37,13 @@ type Session = {
   totalChunks?: number;
 };
 
+type BackendSession = {
+  id: string;
+  title: string;
+  documents?: { filename: string; chunks: number }[];
+  total_chunks?: number;
+};
+
 const DEFAULT_SESSION: Session = {
   id: "default",
   title: "Nueva Sesion",
@@ -102,20 +109,33 @@ export default function ChatPage() {
           setSessions((prev) => {
             const currentActiveId =
               prev.find((session) => session.active)?.id || DEFAULT_SESSION.id;
-            const backendSessions = data.map((session: any) => ({
-              id: session.id,
-              title: session.title,
-              active: session.id === currentActiveId,
-              documents: session.documents,
-              totalChunks: session.total_chunks,
-            }));
+            const backendSessions: Session[] = data.map(
+              (session: BackendSession) => ({
+                id: session.id,
+                title: session.title,
+                active: session.id === currentActiveId,
+                documents: session.documents,
+                totalChunks: session.total_chunks,
+              }),
+            );
 
-            const hasActive = backendSessions.some((session: Session) => session.active);
-            if (!hasActive && backendSessions.length > 0) {
-              backendSessions[0].active = true;
+            const backendSessionIds = new Set(
+              backendSessions.map((session) => session.id),
+            );
+            const frontendOnlySessions = prev
+              .filter((session) => !backendSessionIds.has(session.id))
+              .map((session) => ({
+                ...session,
+                active: session.id === currentActiveId,
+              }));
+            const mergedSessions = [...frontendOnlySessions, ...backendSessions];
+
+            const hasActive = mergedSessions.some((session) => session.active);
+            if (!hasActive && mergedSessions.length > 0) {
+              mergedSessions[0].active = true;
             }
 
-            return backendSessions.length > 0 ? backendSessions : prev;
+            return mergedSessions.length > 0 ? mergedSessions : prev;
           });
         }
       })
