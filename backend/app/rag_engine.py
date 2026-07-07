@@ -225,11 +225,11 @@ def _extract_text(file_path: str) -> str:
     """
     ext = Path(file_path).suffix.lower()
     if ext == ".pdf":
+        from pypdf import PdfReader
         try:
-            from pypdf import PdfReader, PdfReadError
             reader = PdfReader(file_path)
             return "\n".join(page.extract_text() or "" for page in reader.pages)
-        except PdfReadError:
+        except Exception:
             return ""
     elif ext == ".docx":
         try:
