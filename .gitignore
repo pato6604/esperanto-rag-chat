@@ -18,11 +18,11 @@ node_modules/
 
 # Qdrant
 qdrant_db/
+qdrant_db2/
 
 # Logs
 *.log
-uvicorn-*.out.log
-uvicorn-*.err.log
+backend/uvicorn.log
 
 # Codex temp files
 codex_task.md
@@ -32,6 +32,12 @@ pretty_print.py
 
 # Codex sandbox scripts
 frontend/scripts/
+
+# Test files
+test_doc*.txt
+test_formats/
+backend/test_reset.py
+.hermes/
 
 # OS
 .DS_Store
