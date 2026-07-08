@@ -132,6 +132,70 @@ def _session_text_filter(session_id: str, text: str) -> Filter:
     )
 
 
+def _global_hybrid_search(
+    client: QdrantClient,
+    query_vector: list[float],
+    message: str,
+) -> list:
+    """Busca contenido relevante en todas las sesiones."""
+    return client.query_points(
+        collection_name=settings.collection_name,
+        prefetch=[
+            Prefetch(query=query_vector, using="", limit=settings.top_k * 3),
+            Prefetch(
+                query=Filter(
+                    must=[FieldCondition(key="text", match=MatchText(text=message))]
+                ),
+                limit=settings.top_k * 3,
+            ),
+        ],
+        query=FusionQuery(fusion=Fusion.RRF),
+        limit=settings.top_k,
+    ).points
+
+
+def _cross_session_message(
+    global_result: list,
+    current_session_id: str,
+) -> str | None:
+    """Devuelve un aviso si los resultados pertenecen a otras sesiones."""
+    session_ids: list[str] = []
+    seen_session_ids: set[str] = set()
+
+    for hit in global_result:
+        payload = hit.payload or {}
+        result_session_id = payload.get("session_id")
+        if not result_session_id:
+            continue
+
+        result_session_id = str(result_session_id)
+        if (
+            result_session_id == current_session_id
+            or result_session_id in seen_session_ids
+        ):
+            continue
+
+        session_ids.append(result_session_id)
+        seen_session_ids.add(result_session_id)
+
+    if not session_ids:
+        return None
+
+    titles = [get_session_title(result_session_id) for result_session_id in session_ids]
+    quoted_titles = ", ".join(f"'{title}'" for title in titles)
+
+    if len(titles) == 1:
+        return (
+            f"Esa información está en la sesión {quoted_titles}. "
+            "Cambiá de sesión para consultar esos documentos."
+        )
+
+    return (
+        f"Esa información está en las sesiones: {quoted_titles}. "
+        "Cambiá de sesión para consultar esos documentos."
+    )
+
+
 def _now_iso() -> str:
     """Devuelve la fecha actual en formato ISO sin zona horaria."""
     return datetime.now().isoformat(timespec="seconds")
@@ -492,6 +556,11 @@ def chat(message: str, session_id: str = "default") -> tuple[str, list[str]]:
     ).points
 
     if not search_result:
+        global_result = _global_hybrid_search(client, query_vector, message)
+        cross_session_message = _cross_session_message(global_result, session_id)
+        if cross_session_message:
+            return cross_session_message, []
+
         # No docs ingested yet — just chat
         completion = _call_with_retry(
             lambda: oai.chat.completions.create(
@@ -571,6 +640,13 @@ async def chat_stream(
 
     sources: list[str] = []
     if not search_result:
+        global_result = _global_hybrid_search(client, query_vector, message)
+        cross_session_message = _cross_session_message(global_result, session_id)
+        if cross_session_message:
+            yield {"type": "cross_session", "message": cross_session_message}
+            yield {"type": "done", "sources": []}
+            return
+
         # No docs ingested yet -- just chat, but still stream the response.
         messages = [{"role": "user", "content": message}]
     else:

@@ -85,6 +85,7 @@ export default function ChatPage() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [editingTitle, setEditingTitle] = useState(false);
   const [editTitleValue, setEditTitleValue] = useState("");
+  const [deleteConfirm, setDeleteConfirm] = useState<Session | null>(null);
 
   const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
   const activeSession = sessions.find((session) => session.active);
@@ -375,7 +376,7 @@ export default function ChatPage() {
       let buffer = "";
       let assistantIndex: number | null = null;
 
-      const processEvent = (rawEvent: string) => {
+      const processEvent = (rawEvent: string): boolean => {
         const dataLines = rawEvent
           .split("\n")
           .filter((line) => line.startsWith("data:"))
@@ -386,7 +387,8 @@ export default function ChatPage() {
         const event = JSON.parse(dataLines.join("\n")) as
           | { type: "chunk"; content: string }
           | { type: "done"; sources: string[] }
-          | { type: "error"; message: string };
+          | { type: "error"; message: string }
+          | { type: "cross_session"; message: string };
 
         if (event.type === "chunk") {
           setStreaming(true);
@@ -408,6 +410,23 @@ export default function ChatPage() {
             ),
           );
           return false;
+        }
+
+        if (event.type === "cross_session") {
+          setStreaming(true);
+          setLoading(false);
+          assistantIndex = currentMessages.length + 1;
+          updateSessionMessages(currentSessionId, (prev) => [
+            ...prev,
+            { role: "assistant", content: event.message },
+          ]);
+          streamController.abort();
+          if (streamControllerRef.current === streamController) {
+            streamControllerRef.current = null;
+          }
+          setStreaming(false);
+          setLoading(false);
+          return true;
         }
 
         if (event.type === "done") {
@@ -616,28 +635,7 @@ export default function ChatPage() {
                   className="size-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-60 hover:opacity-100"
                   onClick={(e) => {
                     e.stopPropagation();
-                    setSessionMessages((prev) => {
-                      const remainingMessages = { ...prev };
-                      delete remainingMessages[s.id];
-                      return remainingMessages;
-                    });
-                    setSessions((prev) => {
-                      const remaining = prev.filter((session) => session.id !== s.id);
-
-                      if (!s.active) {
-                        return remaining;
-                      }
-
-                      return remaining.map((session, index) => ({
-                        ...session,
-                        active: index === 0,
-                      }));
-                    });
-                    fetch(`${API_BASE}/api/sessions/delete`, {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ session_id: s.id }),
-                    }).catch(() => {});
+                    setDeleteConfirm(s);
                   }}
                 />
               </button>
@@ -886,6 +884,57 @@ export default function ChatPage() {
           </div>
         </div>
       </div>
+      {deleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="w-96 rounded-2xl border border-[#2e2e2e] bg-[#0f0f0f] p-6 shadow-[0_24px_64px_rgba(0,0,0,0.45)]">
+            <h3 className="text-lg font-semibold text-[#fafafa]">
+              Eliminar sesión
+            </h3>
+            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+              ¿Eliminar esta sesión y sus documentos? Esta acción no se puede deshacer.
+            </p>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                onClick={() => setDeleteConfirm(null)}
+                className="rounded-lg border border-[#2e2e2e] bg-[#151515] px-4 py-2 text-sm text-[#fafafa] hover:bg-[#1e1e1e]"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => {
+                  const s: Session = deleteConfirm;
+                  setDeleteConfirm(null);
+                  setSessionMessages((prev) => {
+                    const remainingMessages = { ...prev };
+                    delete remainingMessages[s.id];
+                    return remainingMessages;
+                  });
+                  setSessions((prev) => {
+                    const remaining = prev.filter((session) => session.id !== s.id);
+
+                    if (!s.active) {
+                      return remaining;
+                    }
+
+                    return remaining.map((session, index) => ({
+                      ...session,
+                      active: index === 0,
+                    }));
+                  });
+                  fetch(`${API_BASE}/api/sessions/delete`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ session_id: s.id }),
+                  }).catch(() => {});
+                }}
+                className="rounded-lg bg-[#ef4444] px-4 py-2 text-sm font-medium text-[#fafafa] hover:bg-[#dc2626]"
+              >
+                Eliminar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
