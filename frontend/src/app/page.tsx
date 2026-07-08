@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   AlertTriangle,
+  ChevronDown,
   FileText,
   MessageSquare,
   PanelLeft,
@@ -86,6 +87,11 @@ export default function ChatPage() {
   const [editingTitle, setEditingTitle] = useState(false);
   const [editTitleValue, setEditTitleValue] = useState("");
   const [deleteConfirm, setDeleteConfirm] = useState<Session | null>(null);
+  const [deleteConfirmEntering, setDeleteConfirmEntering] = useState(false);
+  const [docsPanelOpen, setDocsPanelOpen] = useState(true);
+  const deleteConfirmCloseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
 
   const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
   const activeSession = sessions.find((session) => session.active);
@@ -97,6 +103,38 @@ export default function ChatPage() {
     ? sessionMessages[activeSessionId] || EMPTY_MESSAGES
     : EMPTY_MESSAGES;
   const showEmptyState = !activeSession;
+
+  const openDeleteConfirm = (session: Session) => {
+    if (deleteConfirmCloseTimeoutRef.current) {
+      clearTimeout(deleteConfirmCloseTimeoutRef.current);
+      deleteConfirmCloseTimeoutRef.current = null;
+    }
+
+    setDeleteConfirm(session);
+    setDeleteConfirmEntering(false);
+    requestAnimationFrame(() => setDeleteConfirmEntering(true));
+  };
+
+  const closeDeleteConfirm = useCallback(() => {
+    setDeleteConfirmEntering(false);
+
+    if (deleteConfirmCloseTimeoutRef.current) {
+      clearTimeout(deleteConfirmCloseTimeoutRef.current);
+    }
+
+    deleteConfirmCloseTimeoutRef.current = setTimeout(() => {
+      setDeleteConfirm(null);
+      deleteConfirmCloseTimeoutRef.current = null;
+    }, 200);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (deleteConfirmCloseTimeoutRef.current) {
+        clearTimeout(deleteConfirmCloseTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const fetchSessionData = useCallback(() => {
     fetch(`${API_BASE}/api/sessions`)
@@ -635,7 +673,7 @@ export default function ChatPage() {
                   className="size-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-60 hover:opacity-100"
                   onClick={(e) => {
                     e.stopPropagation();
-                    setDeleteConfirm(s);
+                    openDeleteConfirm(s);
                   }}
                 />
               </button>
@@ -737,24 +775,40 @@ export default function ChatPage() {
 
         {/* Vista general de la sesion activa */}
         {activeSessionDocuments.length > 0 && (
-          <div className="border-b border-border/80 bg-[#0f0f0f]/40 px-8 py-3">
-            <div className="mx-auto max-w-4xl">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs text-muted-foreground">
-                    {activeSessionDocuments.length} documentos · {activeSessionTotalChunks} chunks
-                  </p>
-                </div>
+          <div className="border-b border-border/80 bg-[#0f0f0f]/40">
+            <button
+              type="button"
+              onClick={() => setDocsPanelOpen((open) => !open)}
+              className="w-full px-8 py-3 text-left transition-colors hover:bg-[#0f0f0f]/60"
+              aria-expanded={docsPanelOpen}
+            >
+              <div className="mx-auto flex max-w-4xl items-center justify-between gap-3">
+                <p className="text-xs text-muted-foreground">
+                  {activeSessionDocuments.length} documentos · {activeSessionTotalChunks} chunks
+                </p>
+                <ChevronDown
+                  className={`size-4 shrink-0 text-muted-foreground transition-transform duration-200 ${
+                    docsPanelOpen ? "rotate-0" : "-rotate-90"
+                  }`}
+                />
               </div>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {activeSessionDocuments.map((doc, i) => (
-                  <span
-                    key={`${doc.filename}-${i}`}
-                    className="inline-flex items-center gap-1 rounded-full border border-[#3ecf8e]/25 bg-[#0f0f0f] px-2.5 py-1 text-xs text-[#3ecf8e]"
-                  >
-                    {doc.filename} · {doc.chunks} chunks
-                  </span>
-                ))}
+            </button>
+            <div
+              className={`overflow-hidden transition-all duration-300 ease-out ${
+                docsPanelOpen ? "max-h-[500px] opacity-100" : "max-h-0 opacity-0"
+              }`}
+            >
+              <div className="mx-auto max-w-4xl px-8 pb-3">
+                <div className="flex flex-wrap gap-2">
+                  {activeSessionDocuments.map((doc, i) => (
+                    <span
+                      key={`${doc.filename}-${i}`}
+                      className="inline-flex items-center gap-1 rounded-full border border-[#3ecf8e]/25 bg-[#0f0f0f] px-2.5 py-1 text-xs text-[#3ecf8e]"
+                    >
+                      {doc.filename} · {doc.chunks} chunks
+                    </span>
+                  ))}
+                </div>
               </div>
             </div>
           </div>
@@ -885,8 +939,18 @@ export default function ChatPage() {
         </div>
       </div>
       {deleteConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="w-96 rounded-2xl border border-[#2e2e2e] bg-[#0f0f0f] p-6 shadow-[0_24px_64px_rgba(0,0,0,0.45)]">
+        <div
+          className={`fixed inset-0 z-50 flex items-center justify-center transition-all duration-200 ${
+            deleteConfirmEntering
+              ? "bg-black/60 backdrop-blur-sm"
+              : "bg-transparent backdrop-blur-none"
+          }`}
+        >
+          <div
+            className={`w-96 rounded-2xl border border-[#2e2e2e] bg-[#0f0f0f] p-6 shadow-[0_24px_64px_rgba(0,0,0,0.45)] transition-all duration-200 ${
+              deleteConfirmEntering ? "scale-100 opacity-100" : "scale-95 opacity-0"
+            }`}
+          >
             <h3 className="text-lg font-semibold text-[#fafafa]">
               Eliminar sesión
             </h3>
@@ -895,7 +959,7 @@ export default function ChatPage() {
             </p>
             <div className="mt-6 flex justify-end gap-3">
               <button
-                onClick={() => setDeleteConfirm(null)}
+                onClick={closeDeleteConfirm}
                 className="rounded-lg border border-[#2e2e2e] bg-[#151515] px-4 py-2 text-sm text-[#fafafa] hover:bg-[#1e1e1e]"
               >
                 Cancelar
@@ -903,7 +967,7 @@ export default function ChatPage() {
               <button
                 onClick={() => {
                   const s: Session = deleteConfirm;
-                  setDeleteConfirm(null);
+                  closeDeleteConfirm();
                   setSessionMessages((prev) => {
                     const remainingMessages = { ...prev };
                     delete remainingMessages[s.id];
