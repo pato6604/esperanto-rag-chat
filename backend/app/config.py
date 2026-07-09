@@ -53,7 +53,7 @@ class Settings(BaseSettings):
     GEMINI_BASE_URL: str = "https://generativelanguage.googleapis.com/v1beta/openai"
 
     embedding_model: str = "gemini-embedding-001"
-    chat_model: str = "gemini-2.0-flash"
+    chat_model: str = "gemini-3.1-flash-lite-preview"
 
     QDRANT_MODE: str = "local"
     QDRANT_URL: str = ""
