@@ -982,6 +982,7 @@ export default function ChatPage() {
                     : "Subí un documento para empezar"
                 }
                 disabled={loading}
+                autoComplete="off"
                 className="h-auto min-h-5 border-0 bg-transparent px-1 text-sm shadow-none placeholder:text-muted-foreground focus-visible:ring-0"
               />
               <Button
