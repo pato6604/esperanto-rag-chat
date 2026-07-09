@@ -917,41 +917,30 @@ export default function ChatPage() {
                     </div>
                   ))}
 
-                  {loading && !streaming && (
+                  {(streaming || loading) && (
                     <div className="message-enter flex justify-start">
-                      <div className="glass-panel gradient-border w-[60%] min-w-64 rounded-2xl px-4 py-4">
-                        <div
-                          style={{
-                            background:
-                              "linear-gradient(90deg, var(--bg-tertiary) 25%, var(--border-color) 50%, var(--bg-tertiary) 75%)",
-                            backgroundSize: "200% 100%",
-                            animation: "shimmer 1.5s infinite",
-                            borderRadius: "16px",
-                            height: "80px",
-                            width: "100%",
-                          }}
-                        />
-                      </div>
-                    </div>
-                  )}
-
-                  {streaming && (
-                    <div className="message-enter flex justify-start">
-                      <div className="glass-panel gradient-border w-56 rounded-2xl px-4 py-3">
-                        <div className="mb-2 text-xs text-muted-foreground">
-                          Respondiendo...
-                        </div>
-                        <div
-                          style={{
-                            background:
-                              "linear-gradient(90deg, var(--bg-tertiary) 25%, var(--border-color) 50%, var(--bg-tertiary) 75%)",
-                            backgroundSize: "200% 100%",
-                            animation: "shimmer 1.5s infinite",
-                            borderRadius: "9999px",
-                            height: "10px",
-                            width: "70%",
-                          }}
-                        />
+                      <div className="glass-panel gradient-border w-[60%] min-w-64 max-w-[82%] rounded-3xl px-4 py-3.5">
+                        {streaming && (
+                          <div className="mb-3 flex items-center gap-2 text-xs text-muted-foreground">
+                            <span>Respondiendo...</span>
+                            <span className="size-1.5 animate-pulse rounded-full bg-[#3ecf8e]" />
+                          </div>
+                        )}
+                        {["85%", "100%", "65%"].map((width) => (
+                          <div
+                            key={width}
+                            className="mb-2 last:mb-0"
+                            style={{
+                              background:
+                                "linear-gradient(90deg, var(--bg-tertiary) 20%, rgba(255,255,255,0.08) 50%, var(--bg-tertiary) 80%)",
+                              backgroundSize: "200% 100%",
+                              animation: "shimmer 2s infinite",
+                              borderRadius: "6px",
+                              height: "12px",
+                              width,
+                            }}
+                          />
+                        ))}
                       </div>
                     </div>
                   )}
