@@ -2,12 +2,14 @@
 
 import {
   type ChangeEvent,
+  type DragEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   useCallback,
   useEffect,
   useRef,
   useState,
 } from "react";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -89,6 +91,7 @@ export default function ChatPage() {
   const [deleteConfirm, setDeleteConfirm] = useState<Session | null>(null);
   const [deleteConfirmEntering, setDeleteConfirmEntering] = useState(false);
   const [docsPanelOpen, setDocsPanelOpen] = useState(true);
+  const [isDragging, setIsDragging] = useState(false);
   const deleteConfirmCloseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -544,9 +547,7 @@ export default function ChatPage() {
     }
   }
 
-  async function handleFileUpload(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  async function uploadFile(file: File) {
     const currentSessionId =
       activeSessionId || createLocalSession(createSessionId(), file.name);
 
@@ -590,8 +591,22 @@ export default function ChatPage() {
     } catch {
       appendAssistantError(getErrorMessage(), currentSessionId);
     }
+  }
 
+  async function handleFileUpload(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    await uploadFile(file);
     if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  async function handleFileDrop(e: DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    setIsDragging(false);
+
+    const file = e.dataTransfer.files[0];
+    if (!file) return;
+    await uploadFile(file);
   }
 
   function handleKeyDown(e: ReactKeyboardEvent<HTMLInputElement>) {
@@ -754,6 +769,7 @@ export default function ChatPage() {
             </span>
           </div>
           <div className="flex items-center gap-2">
+            <ThemeToggle />
             <input
               ref={fileInputRef}
               type="file"
@@ -814,7 +830,25 @@ export default function ChatPage() {
           </div>
         )}
 
-        <div className="flex-1 overflow-hidden">
+        <div
+          className="relative flex-1 overflow-hidden"
+          onDragOver={(e) => {
+            e.preventDefault();
+            setIsDragging(true);
+          }}
+          onDragLeave={() => setIsDragging(false)}
+          onDrop={handleFileDrop}
+        >
+          {isDragging && (
+            <div className="pointer-events-none absolute inset-4 z-40 flex items-center justify-center rounded-2xl border-2 border-dashed border-[#3ecf8e] bg-[#0f0f0f]/82 backdrop-blur-sm">
+              <div className="flex flex-col items-center gap-3 text-[#3ecf8e]">
+                <Upload className="size-10" />
+                <p className="text-base font-semibold">
+                  Soltá el archivo para subirlo
+                </p>
+              </div>
+            </div>
+          )}
           <ScrollArea className="h-full">
             <div className="mx-auto max-w-4xl px-8 py-8">
               {showEmptyState ? (
@@ -883,17 +917,41 @@ export default function ChatPage() {
                     </div>
                   ))}
 
-                  {(loading || streaming) && (
+                  {loading && !streaming && (
                     <div className="message-enter flex justify-start">
-                      <div className="glass-panel gradient-border rounded-2xl px-4 py-3">
-                        <div className="flex items-center gap-2 text-muted-foreground">
-                          <span className="typing-dot size-2 rounded-full bg-[#3ecf8e]" />
-                          <span className="typing-dot size-2 rounded-full bg-[#3ecf8e]" />
-                          <span className="typing-dot size-2 rounded-full bg-[#3ecf8e]" />
-                          <span className="ml-1 text-sm">
-                            {streaming ? "Respondiendo..." : "Pensando..."}
-                          </span>
+                      <div className="glass-panel gradient-border w-[60%] min-w-64 rounded-2xl px-4 py-4">
+                        <div
+                          style={{
+                            background:
+                              "linear-gradient(90deg, var(--bg-tertiary) 25%, var(--border-color) 50%, var(--bg-tertiary) 75%)",
+                            backgroundSize: "200% 100%",
+                            animation: "shimmer 1.5s infinite",
+                            borderRadius: "16px",
+                            height: "80px",
+                            width: "100%",
+                          }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {streaming && (
+                    <div className="message-enter flex justify-start">
+                      <div className="glass-panel gradient-border w-56 rounded-2xl px-4 py-3">
+                        <div className="mb-2 text-xs text-muted-foreground">
+                          Respondiendo...
                         </div>
+                        <div
+                          style={{
+                            background:
+                              "linear-gradient(90deg, var(--bg-tertiary) 25%, var(--border-color) 50%, var(--bg-tertiary) 75%)",
+                            backgroundSize: "200% 100%",
+                            animation: "shimmer 1.5s infinite",
+                            borderRadius: "9999px",
+                            height: "10px",
+                            width: "70%",
+                          }}
+                        />
                       </div>
                     </div>
                   )}
