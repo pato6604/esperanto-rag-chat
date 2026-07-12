@@ -28,8 +28,14 @@ import {
 type Message = {
   role: "user" | "assistant";
   content: string;
-  sources?: string[];
+  sources?: SourceInfo[];
+  followUps?: string[];
   error?: boolean;
+};
+
+type SourceInfo = {
+  filename: string;
+  snippet: string;
 };
 
 type Session = {
@@ -38,6 +44,7 @@ type Session = {
   active: boolean;
   documents?: { filename: string; chunks: number }[];
   totalChunks?: number;
+  totalMessages?: number;
 };
 
 type BackendSession = {
@@ -45,6 +52,7 @@ type BackendSession = {
   title: string;
   documents?: { filename: string; chunks: number }[];
   total_chunks?: number;
+  total_messages?: number;
 };
 
 const EMPTY_MESSAGES: Message[] = [];
@@ -60,6 +68,66 @@ function hasSessionDocuments(session: Pick<Session, "documents" | "totalChunks">
   );
 }
 
+function normalizeSources(sources: unknown): SourceInfo[] {
+  if (!Array.isArray(sources)) return [];
+
+  return sources
+    .map((source) => {
+      if (typeof source === "string") {
+        return { filename: source, snippet: "" };
+      }
+
+      if (
+        source &&
+        typeof source === "object" &&
+        "filename" in source &&
+        typeof source.filename === "string"
+      ) {
+        return {
+          filename: source.filename,
+          snippet:
+            "snippet" in source && typeof source.snippet === "string"
+              ? source.snippet
+              : "",
+        };
+      }
+
+      return null;
+    })
+    .filter((source): source is SourceInfo => source !== null);
+}
+
+function normalizeMessages(messages: unknown): Message[] {
+  if (!Array.isArray(messages)) return [];
+
+  return messages
+    .map((message) => {
+      if (
+        !message ||
+        typeof message !== "object" ||
+        !("role" in message) ||
+        !("content" in message) ||
+        (message.role !== "user" && message.role !== "assistant") ||
+        typeof message.content !== "string"
+      ) {
+        return null;
+      }
+
+      const rawFollowUps =
+        "followUps" in message ? message.followUps : "follow_ups" in message ? message.follow_ups : [];
+
+      return {
+        role: message.role,
+        content: message.content,
+        sources: normalizeSources("sources" in message ? message.sources : []),
+        followUps: Array.isArray(rawFollowUps)
+          ? rawFollowUps.filter((item): item is string => typeof item === "string")
+          : [],
+      };
+    })
+    .filter((message): message is Message => message !== null);
+}
+
 function deriveSessionTitle(messages: Message[]): string {
   const firstUserMessage = messages.find((message) => message.role === "user");
 
@@ -69,6 +137,40 @@ function deriveSessionTitle(messages: Message[]): string {
 
   const title = firstUserMessage.content.trim().replace(/\s+/g, " ");
   return title.length > 30 ? `${title.slice(0, 30)}...` : title;
+}
+
+function MessageSources({ sources }: { sources: SourceInfo[] }) {
+  const [expandedSource, setExpandedSource] = useState<number | null>(null);
+
+  return (
+    <div className="mt-2 flex flex-col gap-1.5 border-t border-border pt-2">
+      <div className="flex flex-wrap gap-1.5">
+        {sources.map((src, j) => (
+          <button
+            key={`${src.filename}-${j}`}
+            type="button"
+            onClick={() =>
+              setExpandedSource((current) => (current === j ? null : j))
+            }
+            className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-background px-2 py-0.5 text-[10px] font-medium text-primary transition-colors hover:bg-primary/10"
+          >
+            <FileText className="size-3" />
+            <span>{src.filename}</span>
+            <ChevronDown
+              className={`size-3 transition-transform duration-200 ${
+                expandedSource === j ? "rotate-180" : "rotate-0"
+              }`}
+            />
+          </button>
+        ))}
+      </div>
+      {expandedSource !== null && sources[expandedSource] && (
+        <p className="rounded-md border border-border/70 bg-background/70 px-2 py-1.5 text-[11px] leading-4 text-muted-foreground">
+          {sources[expandedSource].snippet}
+        </p>
+      )}
+    </div>
+  );
 }
 
 export default function ChatPage() {
@@ -153,10 +255,13 @@ export default function ChatPage() {
                 active: session.id === currentActiveId,
                 documents: session.documents,
                 totalChunks: session.total_chunks,
+                totalMessages: session.total_messages,
               }))
               .filter(
                 (session) =>
-                  session.id !== "default" && hasSessionDocuments(session),
+                  session.id !== "default" &&
+                  (hasSessionDocuments(session) ||
+                    (session.totalMessages && session.totalMessages > 0)),
               );
 
             const backendSessionIds = new Set(
@@ -198,6 +303,22 @@ export default function ChatPage() {
         [sessionId]: nextMessages,
       };
     });
+  }
+
+  async function loadSessionMessages(sessionId: string) {
+    try {
+      const res = await fetch(`${API_BASE}/api/sessions/${sessionId}/messages`);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (Array.isArray(data.messages)) {
+        setSessionMessages((prev) => ({
+          ...prev,
+          [sessionId]: normalizeMessages(data.messages),
+        }));
+      }
+    } catch {
+      // Mantener los mensajes locales si no se puede leer el historial persistido.
+    }
   }
 
   function createLocalSession(newId: string, title = "Nueva Sesion") {
@@ -243,6 +364,12 @@ export default function ChatPage() {
   useEffect(() => {
     fetchSessionData();
   }, [fetchSessionData]);
+
+  useEffect(() => {
+    if (activeSessionId && sessionMessages[activeSessionId] === undefined) {
+      loadSessionMessages(activeSessionId);
+    }
+  }, [activeSessionId, sessionMessages]);
 
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -341,13 +468,18 @@ export default function ChatPage() {
     const data = await res.json();
     updateSessionMessages(sessionId, (prev) => [
       ...prev,
-      { role: "assistant", content: data.response, sources: data.sources },
+      {
+        role: "assistant",
+        content: data.response,
+        sources: normalizeSources(data.sources),
+        followUps: data.follow_ups || [],
+      },
     ]);
   }
 
-  async function sendMessage() {
-    if (!input.trim()) return;
-    const messageText = input;
+  async function sendMessage(messageOverride?: string) {
+    const messageText = messageOverride ?? input;
+    if (!messageText.trim()) return;
     const userMsg: Message = { role: "user", content: messageText };
     const currentSessionId =
       activeSessionId || createLocalSession(createSessionId());
@@ -427,7 +559,7 @@ export default function ChatPage() {
 
         const event = JSON.parse(dataLines.join("\n")) as
           | { type: "chunk"; content: string }
-          | { type: "done"; sources: string[] }
+          | { type: "done"; sources: unknown; follow_ups?: string[] }
           | { type: "error"; message: string }
           | { type: "cross_session"; message: string };
 
@@ -475,7 +607,11 @@ export default function ChatPage() {
             updateSessionMessages(currentSessionId, (prev) =>
               prev.map((msg, index) =>
                 index === assistantIndex
-                  ? { ...msg, sources: event.sources }
+                  ? {
+                      ...msg,
+                      sources: normalizeSources(event.sources),
+                      followUps: event.follow_ups || [],
+                    }
                   : msg,
               ),
             );
@@ -660,6 +796,7 @@ export default function ChatPage() {
                       active: session.id === s.id,
                     })),
                   );
+                  loadSessionMessages(s.id);
                 }}
                 className={`
                   group flex w-[calc(100%-2px)] items-center gap-2 rounded-lg px-3 py-2 text-left text-sm
@@ -901,18 +1038,33 @@ export default function ChatPage() {
                           <p className="whitespace-pre-wrap">{m.content}</p>
                         </div>
                         {m.sources && m.sources.length > 0 && (
-                          <div className="mt-2 flex flex-wrap gap-1.5 border-t border-border pt-2">
-                            {m.sources.map((src, j) => (
-                              <span
-                                key={j}
-                                className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-background px-2 py-0.5 text-[10px] font-medium text-primary"
-                              >
-                                <FileText className="size-3" />
-                                {src}
-                              </span>
-                            ))}
-                          </div>
+                          <MessageSources sources={m.sources} />
                         )}
+                        {m.role === "assistant" &&
+                          m.followUps &&
+                          m.followUps.length > 0 && (
+                            <div className="mt-2 border-t border-border pt-2">
+                              <p className="mb-1.5 text-xs text-muted-foreground">
+                                {"Segu\u00ed preguntando"}
+                              </p>
+                              <div className="flex flex-wrap gap-1.5">
+                                {m.followUps.map((question, j) => (
+                                  <button
+                                    key={`${question}-${j}`}
+                                    type="button"
+                                    disabled={loading}
+                                    onClick={() => {
+                                      setInput(question);
+                                      sendMessage(question);
+                                    }}
+                                    className="rounded-full border border-primary/30 bg-background px-2.5 py-1 text-[11px] font-medium text-primary transition-colors hover:bg-primary/10 disabled:opacity-40"
+                                  >
+                                    {question}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                       </div>
                     </div>
                   ))}

@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ChatRequest(BaseModel):
@@ -6,9 +6,15 @@ class ChatRequest(BaseModel):
     session_id: str = "default"
 
 
+class SourceInfo(BaseModel):
+    filename: str
+    snippet: str
+
+
 class ChatResponse(BaseModel):
     response: str
-    sources: list[str] = []
+    sources: list[SourceInfo] = Field(default_factory=list)
+    follow_ups: list[str] = Field(default_factory=list)
 
 
 class UploadResponse(BaseModel):

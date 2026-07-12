@@ -33,6 +33,12 @@ async def get_session_detail(session_id: str):
     }
 
 
+@router.get("/{session_id}/messages")
+async def get_messages(session_id: str):
+    messages = rag_engine.get_session_messages(session_id)
+    return {"session_id": session_id, "messages": messages}
+
+
 @router.put("/{session_id}/title")
 async def rename_session(session_id: str, body: RenameSessionRequest):
     """

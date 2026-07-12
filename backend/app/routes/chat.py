@@ -34,25 +34,41 @@ async def chat_endpoint(body: ChatRequest):
     if not body.message.strip():
         raise HTTPException(status_code=400, detail="El mensaje no puede estar vacío")
     try:
-        response_text, sources = rag_engine.chat(body.message, body.session_id)
+        response_text, sources, follow_ups = rag_engine.chat(body.message, body.session_id)
     except ValueError as exc:
         logger.exception("Error de configuración o datos en chat")
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except OpenAIError as exc:
         _raise_openai_http_error(exc)
-    return ChatResponse(response=response_text, sources=sources)
+    rag_engine.append_session_message(body.session_id, "user", body.message)
+    rag_engine.append_session_message(
+        body.session_id,
+        "assistant",
+        response_text,
+        sources=sources,
+        follow_ups=follow_ups,
+    )
+    return ChatResponse(response=response_text, sources=sources, follow_ups=follow_ups)
 
 
 @router.get("/chat")
 async def chat_get(message: str, session_id: str = "default"):
     try:
-        response_text, sources = rag_engine.chat(message, session_id)
+        response_text, sources, follow_ups = rag_engine.chat(message, session_id)
     except ValueError as exc:
         logger.exception("Error de configuración o datos en chat")
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except OpenAIError as exc:
         _raise_openai_http_error(exc)
-    return ChatResponse(response=response_text, sources=sources)
+    rag_engine.append_session_message(session_id, "user", message)
+    rag_engine.append_session_message(
+        session_id,
+        "assistant",
+        response_text,
+        sources=sources,
+        follow_ups=follow_ups,
+    )
+    return ChatResponse(response=response_text, sources=sources, follow_ups=follow_ups)
 
 
 @router.get("/chat/stream")

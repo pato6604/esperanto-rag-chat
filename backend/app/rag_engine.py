@@ -143,7 +143,7 @@ def _global_hybrid_search(
         prefetch=[
             Prefetch(query=query_vector, using="", limit=settings.top_k * 3),
             Prefetch(
-                query=Filter(
+                filter=Filter(
                     must=[FieldCondition(key="text", match=MatchText(text=message))]
                 ),
                 limit=settings.top_k * 3,
@@ -361,7 +361,14 @@ def get_all_sessions() -> list[dict]:
     sessions: list[dict] = []
     data_changed = False
 
-    for session_id, session_points in grouped_points.items():
+    session_ids = set(grouped_points) | {
+        str(session_id)
+        for session_id, session_data in sessions_data.items()
+        if isinstance(session_data, dict)
+    }
+
+    for session_id in session_ids:
+        session_points = grouped_points.get(session_id, [])
         documents, total_chunks = _documents_from_points(session_points)
         current_data = sessions_data.get(session_id)
 
@@ -390,6 +397,9 @@ def get_all_sessions() -> list[dict]:
                 "title": current_data["title"],
                 "documents": documents,
                 "total_chunks": total_chunks,
+                "total_messages": len(current_data.get("messages", []))
+                if isinstance(current_data.get("messages"), list)
+                else 0,
                 "last_updated": current_data["last_updated"],
             }
         )
@@ -430,6 +440,91 @@ def set_session_title(session_id: str, title: str) -> None:
     current_data["last_updated"] = now
     sessions_data[session_id] = current_data
     _save_sessions_data(sessions_data)
+
+
+def get_session_messages(session_id: str) -> list[dict]:
+    """Devuelve los mensajes guardados de una sesion."""
+    data = _load_sessions_data()
+    session_data = data.get(session_id, {})
+    if not isinstance(session_data, dict):
+        return []
+    messages = session_data.get("messages", [])
+    if not isinstance(messages, list):
+        return []
+
+    normalized_messages = []
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+
+        normalized = dict(message)
+        if "follow_ups" in normalized and "followUps" not in normalized:
+            normalized["followUps"] = normalized.pop("follow_ups")
+        if "sources" in normalized:
+            normalized["sources"] = _normalize_sources(normalized["sources"])
+        normalized_messages.append(normalized)
+
+    return normalized_messages
+
+
+def _normalize_sources(sources: object) -> list[dict]:
+    """Normaliza sources legacy string[] al formato actual."""
+    if not isinstance(sources, list):
+        return []
+
+    normalized_sources: list[dict] = []
+    for source in sources:
+        if isinstance(source, str):
+            normalized_sources.append({"filename": source, "snippet": ""})
+        elif isinstance(source, dict):
+            filename = source.get("filename")
+            if not filename:
+                continue
+            normalized_sources.append(
+                {
+                    "filename": str(filename),
+                    "snippet": str(source.get("snippet") or ""),
+                }
+            )
+
+    return normalized_sources
+
+
+def append_session_message(
+    session_id: str,
+    role: str,
+    content: str,
+    sources: list[dict] | None = None,
+    follow_ups: list[str] | None = None,
+) -> None:
+    """Agrega un mensaje al historial de la sesion."""
+    data = _load_sessions_data()
+    now = _now_iso()
+    current_data = data.get(session_id)
+
+    if not isinstance(current_data, dict):
+        current_data = {
+            "title": _auto_session_title(session_id),
+            "created_at": now,
+        }
+
+    if "messages" not in current_data:
+        current_data["messages"] = []
+
+    message_data = {
+        "role": role,
+        "content": content,
+        "timestamp": datetime.now().isoformat(),
+    }
+    if sources:
+        message_data["sources"] = _normalize_sources(sources)
+    if follow_ups:
+        message_data["followUps"] = follow_ups
+
+    current_data["messages"].append(message_data)
+    current_data["last_updated"] = now
+    data[session_id] = current_data
+    _save_sessions_data(data)
 
 
 def _touch_session(session_id: str, fallback_title: str | None = None) -> None:
@@ -519,7 +614,40 @@ def ingest_bytes(data: bytes, filename: str, session_id: str = "default") -> int
     return len(chunks)
 
 
-def chat(message: str, session_id: str = "default") -> tuple[str, list[str]]:
+def _build_follow_ups(
+    oai: OpenAI,
+    message: str,
+    full_response: str,
+    context: str,
+) -> list[str]:
+    follow_prompt = (
+        "Genera 3 preguntas de seguimiento breves que el usuario podria hacer "
+        "para profundizar en este tema. Responde SOLO con las preguntas, "
+        "una por linea, sin numeros ni prefijos."
+    )
+    try:
+        follow_resp = _call_with_retry(
+            lambda: oai.chat.completions.create(
+                model=settings.chat_model,
+                messages=[
+                    {"role": "system", "content": f"Contexto:\n{context}"},
+                    {"role": "user", "content": message},
+                    {"role": "assistant", "content": full_response},
+                    {"role": "user", "content": follow_prompt},
+                ],
+            )
+        )
+        follow_text = follow_resp.choices[0].message.content or ""
+        return [
+            q.strip().lstrip("0123456789.- ")
+            for q in follow_text.strip().split("\n")
+            if q.strip()
+        ][:3]
+    except Exception:
+        return []
+
+
+def chat(message: str, session_id: str = "default") -> tuple[str, list[dict], list[str]]:
     """Query RAG: embed message → retrieve chunks → Gemini answers."""
     init_rag()
     client = _get_qdrant()
@@ -559,7 +687,7 @@ def chat(message: str, session_id: str = "default") -> tuple[str, list[str]]:
         global_result = _global_hybrid_search(client, query_vector, message)
         cross_session_message = _cross_session_message(global_result, session_id)
         if cross_session_message:
-            return cross_session_message, []
+            return cross_session_message, [], []
 
         # No docs ingested yet — just chat
         completion = _call_with_retry(
@@ -568,16 +696,19 @@ def chat(message: str, session_id: str = "default") -> tuple[str, list[str]]:
                 messages=[{"role": "user", "content": message}],
             )
         )
-        return completion.choices[0].message.content, []
+        return completion.choices[0].message.content, [], []
 
     # Build context from retrieved chunks
     chunks_text = []
-    sources = set()
+    sources_dict = {}
     for hit in search_result:
         chunks_text.append(hit.payload["text"])
-        sources.add(hit.payload.get("source", "unknown"))
+        filename = hit.payload.get("source", "unknown")
+        if filename not in sources_dict:
+            sources_dict[filename] = hit.payload["text"][:200]
 
     context = "\n\n---\n\n".join(chunks_text)
+    sources = [{"filename": k, "snippet": v} for k, v in sources_dict.items()]
 
     system_prompt = (
         "Eres un asistente de RAG. Usa el siguiente contexto para responder "
@@ -596,14 +727,18 @@ def chat(message: str, session_id: str = "default") -> tuple[str, list[str]]:
         )
     )
 
-    return completion.choices[0].message.content, list(sources)
+    full_response = completion.choices[0].message.content
+    follow_ups = _build_follow_ups(oai, message, full_response, context)
+
+    return full_response, sources, follow_ups
 
 
 async def chat_stream(
     message: str,
     session_id: str = "default",
-) -> AsyncGenerator[dict[str, str | list[str]], None]:
+) -> AsyncGenerator[dict[str, object], None]:
     """Query RAG and stream Gemini chunks, then emit the source list."""
+    append_session_message(session_id, "user", message)
     init_rag()
     client = _get_qdrant()
     oai = _get_openai()
@@ -638,26 +773,36 @@ async def chat_stream(
         limit=settings.top_k,
     ).points
 
-    sources: list[str] = []
+    sources: list[dict] = []
+    context = ""
     if not search_result:
         global_result = _global_hybrid_search(client, query_vector, message)
         cross_session_message = _cross_session_message(global_result, session_id)
         if cross_session_message:
+            append_session_message(
+                session_id,
+                "assistant",
+                cross_session_message,
+                sources=[],
+                follow_ups=[],
+            )
             yield {"type": "cross_session", "message": cross_session_message}
-            yield {"type": "done", "sources": []}
+            yield {"type": "done", "sources": [], "follow_ups": []}
             return
 
         # No docs ingested yet -- just chat, but still stream the response.
         messages = [{"role": "user", "content": message}]
     else:
         chunks_text = []
-        source_names = set()
+        sources_dict = {}
         for hit in search_result:
             chunks_text.append(hit.payload["text"])
-            source_names.add(hit.payload.get("source", "unknown"))
+            filename = hit.payload.get("source", "unknown")
+            if filename not in sources_dict:
+                sources_dict[filename] = hit.payload["text"][:200]
 
         context = "\n\n---\n\n".join(chunks_text)
-        sources = list(source_names)
+        sources = [{"filename": k, "snippet": v} for k, v in sources_dict.items()]
 
         system_prompt = (
             "Eres un asistente de RAG. Usa el siguiente contexto para responder "
@@ -678,12 +823,25 @@ async def chat_stream(
         )
     )
 
+    full_response = ""
     for chunk in stream:
         content = chunk.choices[0].delta.content
         if content:
+            full_response += content
             yield {"type": "chunk", "content": content}
 
-    yield {"type": "done", "sources": sources}
+    follow_ups: list[str] = []
+    if sources:
+        follow_ups = _build_follow_ups(oai, message, full_response, context)
+
+    append_session_message(
+        session_id,
+        "assistant",
+        full_response,
+        sources=sources,
+        follow_ups=follow_ups,
+    )
+    yield {"type": "done", "sources": sources, "follow_ups": follow_ups}
 
 
 def delete_session_chunks(session_id: str) -> int:
