@@ -626,8 +626,8 @@ export default function ChatPage() {
         `}
       >
         <div className="flex h-16 shrink-0 items-center gap-3 border-b border-sidebar-border/80 px-5">
-          <div className="flex size-8 items-center justify-center rounded-xl bg-[#3ecf8e]">
-            <FileText className="size-4 text-[#0f0f0f]" />
+          <div className="flex size-8 items-center justify-center rounded-xl bg-primary">
+            <FileText className="size-4 text-primary-foreground" />
           </div>
           <span className="text-base font-semibold">
             Esperanto
@@ -641,7 +641,7 @@ export default function ChatPage() {
             onClick={() => {
               createLocalSession(createSessionId());
             }}
-            className="w-full justify-start gap-2 rounded-lg border-sidebar-border bg-[#151515]/70 text-sidebar-foreground hover:border-[#3ecf8e]/35 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+            className="w-full justify-start gap-2 rounded-lg border-sidebar-border bg-sidebar-accent/45 text-sidebar-foreground hover:border-primary/35 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
           >
             <Plus className="size-4" />
             Nueva sesion
@@ -663,10 +663,10 @@ export default function ChatPage() {
                 }}
                 className={`
                   group flex w-[calc(100%-2px)] items-center gap-2 rounded-lg px-3 py-2 text-left text-sm
-                  transition-all duration-200 hover:translate-x-0.5 hover:border-[#3ecf8e]/15 hover:shadow-[0_10px_22px_rgba(0,0,0,0.18)]
+                  transition-all duration-200 hover:translate-x-0.5 hover:border-primary/15 hover:shadow-lg hover:shadow-black/10
                   ${
                     s.active
-                      ? "border-l-4 border-l-[#3ecf8e] bg-sidebar-accent text-sidebar-accent-foreground shadow-inner"
+                      ? "border-l-4 border-l-primary bg-sidebar-accent text-sidebar-accent-foreground shadow-inner"
                       : "border border-transparent text-sidebar-foreground hover:bg-sidebar-accent/55 hover:text-sidebar-accent-foreground"
                   }
                 `}
@@ -674,12 +674,12 @@ export default function ChatPage() {
                 <MessageSquare className="size-4 shrink-0" />
                 {s.totalChunks && s.totalChunks > 0 ? (
                   <span
-                    className="ml-0.5 size-2 shrink-0 rounded-full bg-[#3ecf8e]"
+                    className="ml-0.5 size-2 shrink-0 rounded-full bg-primary"
                     title="Tiene documentos"
                   />
                 ) : (
                   <span
-                    className="ml-0.5 size-2 shrink-0 rounded-full bg-[#2e2e2e]"
+                    className="ml-0.5 size-2 shrink-0 rounded-full bg-border"
                     title="Sin documentos"
                   />
                 )}
@@ -724,11 +724,11 @@ export default function ChatPage() {
                   if (e.key === "Escape") setEditingTitle(false);
                 }}
                 autoFocus
-                className="h-7 w-64 border-border bg-[#151515] text-base font-semibold"
+                className="h-7 w-64 border-border bg-secondary text-base font-semibold"
               />
             ) : (
               <h1
-                className="cursor-pointer truncate text-base font-semibold transition-colors hover:text-[#3ecf8e]"
+                className="cursor-pointer truncate text-base font-semibold transition-colors hover:text-primary"
                 onDoubleClick={() => {
                   setEditTitleValue(activeSessionTitle);
                   setEditingTitle(true);
@@ -758,9 +758,9 @@ export default function ChatPage() {
               <span
                 className={`text-sm ${
                   apiStatus === "ok"
-                    ? "text-[#3ecf8e]"
+                    ? "text-primary"
                     : apiStatus === "error"
-                      ? "text-[#ef4444]"
+                      ? "text-destructive"
                       : "text-muted-foreground"
                 }`}
               >
@@ -781,7 +781,7 @@ export default function ChatPage() {
               variant="outline"
               size="sm"
               onClick={() => fileInputRef.current?.click()}
-              className="gap-2 rounded-lg border-border/90 bg-[#151515]/70 text-muted-foreground hover:border-[#3ecf8e]/35 hover:text-foreground"
+              className="gap-2 rounded-lg border-border/90 bg-secondary/70 text-muted-foreground hover:border-primary/35 hover:text-foreground"
             >
               <Upload className="size-4" />
               Subir documento
@@ -791,11 +791,11 @@ export default function ChatPage() {
 
         {/* Vista general de la sesion activa */}
         {activeSessionDocuments.length > 0 && (
-          <div className="border-b border-border/80 bg-[#0f0f0f]/40">
+          <div className="border-b border-border/80 bg-background/40">
             <button
               type="button"
               onClick={() => setDocsPanelOpen((open) => !open)}
-              className="w-full px-8 py-3 text-left transition-colors hover:bg-[#0f0f0f]/60"
+              className="w-full px-8 py-3 text-left transition-colors hover:bg-muted/45"
               aria-expanded={docsPanelOpen}
             >
               <div className="mx-auto flex max-w-4xl items-center justify-between gap-3">
@@ -819,7 +819,7 @@ export default function ChatPage() {
                   {activeSessionDocuments.map((doc, i) => (
                     <span
                       key={`${doc.filename}-${i}`}
-                      className="inline-flex items-center gap-1 rounded-full border border-[#3ecf8e]/25 bg-[#0f0f0f] px-2.5 py-1 text-xs text-[#3ecf8e]"
+                      className="inline-flex items-center gap-1 rounded-full border border-primary/25 bg-background px-2.5 py-1 text-xs text-primary"
                     >
                       {doc.filename} · {doc.chunks} chunks
                     </span>
@@ -840,8 +840,8 @@ export default function ChatPage() {
           onDrop={handleFileDrop}
         >
           {isDragging && (
-            <div className="pointer-events-none absolute inset-4 z-40 flex items-center justify-center rounded-2xl border-2 border-dashed border-[#3ecf8e] bg-[#0f0f0f]/82 backdrop-blur-sm">
-              <div className="flex flex-col items-center gap-3 text-[#3ecf8e]">
+            <div className="pointer-events-none absolute inset-4 z-40 flex items-center justify-center rounded-2xl border-2 border-dashed border-primary bg-background/82 backdrop-blur-sm">
+              <div className="flex flex-col items-center gap-3 text-primary">
                 <Upload className="size-10" />
                 <p className="text-base font-semibold">
                   Soltá el archivo para subirlo
@@ -854,10 +854,10 @@ export default function ChatPage() {
               {showEmptyState ? (
                 <div className="flex min-h-[calc(100dvh-12rem)] items-center justify-center">
                   <div className="flex max-w-md flex-col items-center text-center">
-                    <div className="mb-6 flex size-20 items-center justify-center rounded-2xl border border-[#3ecf8e]/25 bg-[#151515]/80 shadow-[0_18px_48px_rgba(0,0,0,0.3)]">
-                      <Upload className="size-10 text-[#3ecf8e]" />
+                    <div className="mb-6 flex size-20 items-center justify-center rounded-2xl border border-primary/25 bg-secondary/80 shadow-xl shadow-black/15">
+                      <Upload className="size-10 text-primary" />
                     </div>
-                    <h2 className="text-2xl font-semibold text-[#3ecf8e]">
+                    <h2 className="text-2xl font-semibold text-primary">
                       Carga tu documento
                     </h2>
                     <p className="mt-3 text-sm leading-6 text-muted-foreground">
@@ -866,7 +866,7 @@ export default function ChatPage() {
                     <Button
                       variant="outline"
                       onClick={() => fileInputRef.current?.click()}
-                      className="mt-6 gap-2 rounded-lg border-[#3ecf8e]/35 bg-[#151515]/70 text-foreground hover:bg-sidebar-accent"
+                      className="mt-6 gap-2 rounded-lg border-primary/35 bg-secondary/70 text-foreground hover:bg-sidebar-accent"
                     >
                       <Upload className="size-4" />
                       Subir documento
@@ -884,28 +884,28 @@ export default function ChatPage() {
                     >
                       <div
                         className={`
-                          max-w-[82%] rounded-3xl px-4 py-2.5 text-sm leading-relaxed shadow-[0_12px_32px_rgba(0,0,0,0.22)]
+                          max-w-[82%] rounded-3xl px-4 py-2.5 text-sm leading-relaxed shadow-xl shadow-black/10
                           ${
                             m.role === "user"
-                              ? "bg-[#3ecf8e] text-[#0f0f0f] shadow-[0_14px_34px_rgba(62,207,142,0.14)]"
+                              ? "bg-primary text-primary-foreground shadow-lg shadow-primary/15"
                               : m.error
-                                ? "error-message text-[#fafafa]"
-                              : "glass-panel gradient-border text-[#fafafa]"
+                                ? "error-message text-foreground"
+                              : "glass-panel gradient-border text-foreground"
                           }
                         `}
                       >
                         <div className="flex items-start gap-2">
                           {m.error && (
-                            <AlertTriangle className="mt-0.5 size-4 shrink-0 text-[#ef4444]" />
+                            <AlertTriangle className="mt-0.5 size-4 shrink-0 text-destructive" />
                           )}
                           <p className="whitespace-pre-wrap">{m.content}</p>
                         </div>
                         {m.sources && m.sources.length > 0 && (
-                          <div className="mt-2 flex flex-wrap gap-1.5 border-t border-[#2e2e2e] pt-2">
+                          <div className="mt-2 flex flex-wrap gap-1.5 border-t border-border pt-2">
                             {m.sources.map((src, j) => (
                               <span
                                 key={j}
-                                className="inline-flex items-center gap-1 rounded-full border border-[#3ecf8e]/30 bg-[#0f0f0f] px-2 py-0.5 text-[10px] font-medium text-[#3ecf8e]"
+                                className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-background px-2 py-0.5 text-[10px] font-medium text-primary"
                               >
                                 <FileText className="size-3" />
                                 {src}
@@ -923,7 +923,7 @@ export default function ChatPage() {
                         {streaming && (
                           <div className="mb-3 flex items-center gap-2 text-xs text-muted-foreground">
                             <span>Respondiendo...</span>
-                            <span className="size-1.5 animate-pulse rounded-full bg-[#3ecf8e]" />
+                            <span className="size-1.5 animate-pulse rounded-full bg-primary" />
                           </div>
                         )}
                         {["85%", "100%", "65%"].map((width) => (
@@ -932,7 +932,7 @@ export default function ChatPage() {
                             className="mb-2 last:mb-0"
                             style={{
                               background:
-                                "linear-gradient(90deg, var(--bg-tertiary) 20%, rgba(255,255,255,0.08) 50%, var(--bg-tertiary) 80%)",
+                                "linear-gradient(90deg, var(--bg-tertiary) 20%, color-mix(in srgb, var(--text-primary) 8%, transparent) 50%, var(--bg-tertiary) 80%)",
                               backgroundSize: "200% 100%",
                               animation: "shimmer 2s infinite",
                               borderRadius: "6px",
@@ -959,7 +959,7 @@ export default function ChatPage() {
                 e.preventDefault();
                 sendMessage();
               }}
-              className="chat-composer gradient-border flex items-end gap-2 rounded-xl border border-[#2e2e2e] bg-[#0f0f0f]/92 px-4 py-3 shadow-[0_18px_42px_rgba(0,0,0,0.28)]"
+              className="chat-composer gradient-border flex items-end gap-2 rounded-xl border border-border bg-[var(--chat-composer-bg)] px-4 py-3 shadow-xl shadow-black/15"
             >
               <Input
                 value={input}
@@ -978,7 +978,7 @@ export default function ChatPage() {
                 type="submit"
                 disabled={loading || !input.trim()}
                 size="icon"
-                className="size-10 shrink-0 rounded-xl bg-[#3ecf8e] text-[#0f0f0f] shadow-[0_0_20px_rgba(62,207,142,0.18)] hover:bg-[#00c573] disabled:opacity-40"
+                className="size-10 shrink-0 rounded-xl bg-primary text-primary-foreground shadow-lg shadow-primary/20 hover:bg-[var(--color-brand-hover)] disabled:opacity-40"
               >
                 <Send className="size-4" />
               </Button>
@@ -990,16 +990,16 @@ export default function ChatPage() {
         <div
           className={`fixed inset-0 z-50 flex items-center justify-center transition-all duration-200 ${
             deleteConfirmEntering
-              ? "bg-black/60 backdrop-blur-sm"
+              ? "bg-[var(--modal-overlay)] backdrop-blur-sm"
               : "bg-transparent backdrop-blur-none"
           }`}
         >
           <div
-            className={`w-96 rounded-2xl border border-[#2e2e2e] bg-[#0f0f0f] p-6 shadow-[0_24px_64px_rgba(0,0,0,0.45)] transition-all duration-200 ${
+            className={`w-96 rounded-2xl border border-border bg-background p-6 shadow-2xl shadow-black/25 transition-all duration-200 ${
               deleteConfirmEntering ? "scale-100 opacity-100" : "scale-95 opacity-0"
             }`}
           >
-            <h3 className="text-lg font-semibold text-[#fafafa]">
+            <h3 className="text-lg font-semibold text-foreground">
               Eliminar sesión
             </h3>
             <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
@@ -1008,7 +1008,7 @@ export default function ChatPage() {
             <div className="mt-6 flex justify-end gap-3">
               <button
                 onClick={closeDeleteConfirm}
-                className="rounded-lg border border-[#2e2e2e] bg-[#151515] px-4 py-2 text-sm text-[#fafafa] hover:bg-[#1e1e1e]"
+                className="rounded-lg border border-border bg-secondary px-4 py-2 text-sm text-foreground hover:bg-muted"
               >
                 Cancelar
               </button>
@@ -1039,7 +1039,7 @@ export default function ChatPage() {
                     body: JSON.stringify({ session_id: s.id }),
                   }).catch(() => {});
                 }}
-                className="rounded-lg bg-[#ef4444] px-4 py-2 text-sm font-medium text-[#fafafa] hover:bg-[#dc2626]"
+                className="rounded-lg bg-destructive px-4 py-2 text-sm font-medium text-[var(--destructive-foreground)] hover:bg-destructive/90"
               >
                 Eliminar
               </button>

@@ -21,7 +21,21 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: ReactNode }>) {
   return (
-    <html lang="es" className="dark" suppressHydrationWarning>
+    <html lang="es" suppressHydrationWarning>
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              try {
+                var theme = localStorage.getItem("esperanto-theme");
+                var root = document.documentElement;
+                root.classList.toggle("dark", theme !== "light");
+                root.setAttribute("data-theme", theme === "light" ? "light" : "dark");
+              } catch (_) {}
+            `,
+          }}
+        />
+      </head>
       <body className={`${sourceSerif.variable} antialiased`}>{children}</body>
     </html>
   );
