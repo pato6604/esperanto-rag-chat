@@ -739,6 +739,7 @@ export default function ChatPage() {
   async function handleFileDrop(e: DragEvent<HTMLDivElement>) {
     e.preventDefault();
     setIsDragging(false);
+    if (!Array.from(e.dataTransfer.types).includes("Files")) return;
 
     const file = e.dataTransfer.files[0];
     if (!file) return;
@@ -971,7 +972,9 @@ export default function ChatPage() {
           className="relative flex-1 overflow-hidden"
           onDragOver={(e) => {
             e.preventDefault();
-            setIsDragging(true);
+            if (Array.from(e.dataTransfer.types).includes("Files")) {
+              setIsDragging(true);
+            }
           }}
           onDragLeave={() => setIsDragging(false)}
           onDrop={handleFileDrop}
