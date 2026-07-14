@@ -864,4 +864,10 @@ def delete_session_chunks(session_id: str) -> int:
             points_selector=FilterSelector(filter=query_filter),
         )
 
+    # Also clean up sessions_data.json so deleted sessions don't reappear
+    sessions_data = _load_sessions_data()
+    if session_id in sessions_data:
+        del sessions_data[session_id]
+        _save_sessions_data(sessions_data)
+
     return deleted_count
