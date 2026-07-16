@@ -69,6 +69,10 @@ class Settings(BaseSettings):
     chunk_overlap: int = 200
     top_k: int = 5
     vector_dim: int = 3072
+    rerank_enabled: bool = True
+    rerank_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    rerank_top_k: int = 20
+    rerank_final_k: int = 5
 
     @field_validator("QDRANT_MODE")
     @classmethod

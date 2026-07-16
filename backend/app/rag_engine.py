@@ -1,6 +1,7 @@
 import json
 import tempfile
 import os
+import threading
 import time
 from pathlib import Path
 from datetime import datetime
@@ -27,6 +28,7 @@ from qdrant_client.models import (
     TokenizerType,
     VectorParams,
 )
+from sentence_transformers import CrossEncoder
 
 from app.config import settings
 
@@ -56,6 +58,28 @@ def _call_with_retry(fn, max_retries=3, base_delay=5):
 
 _client: QdrantClient | None = None
 _openai: OpenAI | None = None
+_reranker = None
+_reranker_lock = threading.Lock()
+
+
+def _get_reranker() -> CrossEncoder | None:
+    global _reranker
+    if not settings.rerank_enabled:
+        return None
+    if _reranker is None:
+        with _reranker_lock:
+            if _reranker is None:
+                try:
+                    _reranker = CrossEncoder(
+                        settings.rerank_model,
+                        device="cpu",
+                        max_length=512,
+                    )
+                except Exception:
+                    print(f"[rerank] Error cargando modelo {settings.rerank_model}, deshabilitando re-ranking")
+                    settings.rerank_enabled = False
+                    return None
+    return _reranker
 
 
 def _get_qdrant() -> QdrantClient:
@@ -647,6 +671,28 @@ def _build_follow_ups(
         return []
 
 
+def _rerank(
+    query: str,
+    search_result: list,
+    top_k: int,
+) -> list:
+    """Re-rank Qdrant results using a cross-encoder."""
+    reranker = _get_reranker()
+    if reranker is None or not search_result:
+        return search_result[:top_k]
+
+    pairs = [(query, (hit.payload or {}).get("text", "")) for hit in search_result]
+    try:
+        scores = reranker.predict(pairs)
+    except Exception:
+        return search_result[:top_k]
+
+    scored_hits = list(zip(search_result, scores))
+    scored_hits.sort(key=lambda x: x[1], reverse=True)
+
+    return [hit for hit, _ in scored_hits[:top_k]]
+
+
 def chat(message: str, session_id: str = "default") -> tuple[str, list[dict], list[str]]:
     """Query RAG: embed message → retrieve chunks → Gemini answers."""
     init_rag()
@@ -671,17 +717,20 @@ def chat(message: str, session_id: str = "default") -> tuple[str, list[dict], li
             Prefetch(
                 query=query_vector,
                 using="",
-                limit=settings.top_k * 3,
+                limit=settings.rerank_top_k * 3,
                 filter=query_filter,
             ),
             Prefetch(
-                limit=settings.top_k * 3,
+                limit=settings.rerank_top_k * 3,
                 filter=_session_text_filter(session_id, message),
             ),
         ],
         query=FusionQuery(fusion=Fusion.RRF),
-        limit=settings.top_k,
+        limit=settings.rerank_top_k,
     ).points
+
+    if settings.rerank_enabled:
+        search_result = _rerank(message, search_result, settings.rerank_final_k)
 
     if not search_result:
         global_result = _global_hybrid_search(client, query_vector, message)
@@ -761,17 +810,20 @@ async def chat_stream(
             Prefetch(
                 query=query_vector,
                 using="",
-                limit=settings.top_k * 3,
+                limit=settings.rerank_top_k * 3,
                 filter=query_filter,
             ),
             Prefetch(
-                limit=settings.top_k * 3,
+                limit=settings.rerank_top_k * 3,
                 filter=_session_text_filter(session_id, message),
             ),
         ],
         query=FusionQuery(fusion=Fusion.RRF),
-        limit=settings.top_k,
+        limit=settings.rerank_top_k,
     ).points
+
+    if settings.rerank_enabled:
+        search_result = _rerank(message, search_result, settings.rerank_final_k)
 
     sources: list[dict] = []
     context = ""
