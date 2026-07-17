@@ -140,6 +140,13 @@ def _ensure_collection(client: QdrantClient) -> None:
             field_schema=KeywordIndexParams(type=KeywordIndexType.KEYWORD),
         )
 
+    if "user_id" not in payload_schema:
+        client.create_payload_index(
+            collection_name=settings.collection_name,
+            field_name="user_id",
+            field_schema=KeywordIndexParams(type=KeywordIndexType.KEYWORD),
+        )
+
 
 def _session_filter(session_id: str) -> Filter:
     return Filter(
@@ -156,20 +163,71 @@ def _session_text_filter(session_id: str, text: str) -> Filter:
     )
 
 
+def _user_session_filter(user_id: str, session_id: str) -> Filter:
+    return Filter(
+        must=[
+            FieldCondition(key="user_id", match=MatchValue(value=user_id)),
+            FieldCondition(key="session_id", match=MatchValue(value=session_id)),
+        ]
+    )
+
+
+def _user_session_text_filter(user_id: str, session_id: str, text: str) -> Filter:
+    return Filter(
+        must=[
+            FieldCondition(key="user_id", match=MatchValue(value=user_id)),
+            FieldCondition(key="session_id", match=MatchValue(value=session_id)),
+            FieldCondition(key="text", match=MatchText(text=text)),
+        ]
+    )
+
+
+def _user_scroll_filter(user_id: str) -> Filter:
+    return Filter(
+        must=[FieldCondition(key="user_id", match=MatchValue(value=user_id))]
+    )
+
+
 def _global_hybrid_search(
     client: QdrantClient,
     query_vector: list[float],
     message: str,
+    user_id: str = "",
 ) -> list:
     """Busca contenido relevante en todas las sesiones."""
+    user_filter = None
+    text_filter = Filter(
+        must=[FieldCondition(key="text", match=MatchText(text=message))]
+    )
+    if user_id:
+        user_filter = Filter(
+            must=[FieldCondition(key="user_id", match=MatchValue(value=user_id))]
+        )
+        text_filter = Filter(
+            must=[
+                FieldCondition(key="text", match=MatchText(text=message)),
+                FieldCondition(key="user_id", match=MatchValue(value=user_id)),
+            ]
+        )
+    vector_prefetch = Prefetch(
+        query=query_vector,
+        using="",
+        limit=settings.top_k * 3,
+    )
+    if user_filter is not None:
+        vector_prefetch = Prefetch(
+            query=query_vector,
+            using="",
+            limit=settings.top_k * 3,
+            filter=user_filter,
+        )
+
     return client.query_points(
         collection_name=settings.collection_name,
         prefetch=[
-            Prefetch(query=query_vector, using="", limit=settings.top_k * 3),
+            vector_prefetch,
             Prefetch(
-                filter=Filter(
-                    must=[FieldCondition(key="text", match=MatchText(text=message))]
-                ),
+                filter=text_filter,
                 limit=settings.top_k * 3,
             ),
         ],
@@ -181,6 +239,7 @@ def _global_hybrid_search(
 def _cross_session_message(
     global_result: list,
     current_session_id: str,
+    user_id: str = "",
 ) -> str | None:
     """Devuelve un aviso si los resultados pertenecen a otras sesiones."""
     session_ids: list[str] = []
@@ -205,7 +264,7 @@ def _cross_session_message(
     if not session_ids:
         return None
 
-    titles = [get_session_title(result_session_id) for result_session_id in session_ids]
+    titles = [get_session_title(result_session_id, user_id) for result_session_id in session_ids]
     quoted_titles = ", ".join(f"'{title}'" for title in titles)
 
     if len(titles) == 1:
@@ -367,12 +426,12 @@ def init_rag() -> None:
     _ensure_collection(client)
 
 
-def get_all_sessions() -> list[dict]:
+def get_all_sessions(user_id: str = "anonymous") -> list[dict]:
     """
     Scrollea todos los puntos en Qdrant, agrupa por session_id y combina
     la informacion con sessions_data.json.
     """
-    points = _scroll_all_points()
+    points = _scroll_all_points(_user_scroll_filter(user_id))
     grouped_points: dict[str, list] = {}
 
     for point in points:
@@ -389,6 +448,10 @@ def get_all_sessions() -> list[dict]:
         str(session_id)
         for session_id, session_data in sessions_data.items()
         if isinstance(session_data, dict)
+        and (
+            session_data.get("user_id") == user_id
+            or (user_id == "anonymous" and not session_data.get("user_id"))
+        )
     }
 
     for session_id in session_ids:
@@ -401,10 +464,22 @@ def get_all_sessions() -> list[dict]:
                 "title": _auto_session_title(session_id, documents),
                 "created_at": now,
                 "last_updated": now,
+                "user_id": user_id,
             }
             sessions_data[session_id] = current_data
             data_changed = True
         else:
+            if current_data.get("user_id") and current_data.get("user_id") != user_id:
+                current_data = {
+                    "title": _auto_session_title(session_id, documents),
+                    "created_at": now,
+                    "last_updated": now,
+                    "user_id": user_id,
+                    "messages": [],
+                }
+            if not current_data.get("user_id"):
+                current_data["user_id"] = user_id
+                data_changed = True
             if not current_data.get("title"):
                 current_data["title"] = _auto_session_title(session_id, documents)
                 data_changed = True
@@ -438,18 +513,23 @@ def get_all_sessions() -> list[dict]:
     )
 
 
-def get_session_title(session_id: str) -> str:
+def get_session_title(session_id: str, user_id: str = "") -> str:
     """Devuelve el titulo guardado o auto-genera uno."""
     sessions_data = _load_sessions_data()
     session_data = sessions_data.get(session_id)
     if isinstance(session_data, dict) and session_data.get("title"):
+        session_user_id = session_data.get("user_id")
+        if user_id and session_user_id and session_user_id != user_id:
+            return _auto_session_title(session_id)
+        if user_id and not session_user_id and user_id != "anonymous":
+            return _auto_session_title(session_id)
         return str(session_data["title"])
 
-    documents_data = get_session_documents(session_id)
+    documents_data = get_session_documents(session_id, user_id or "anonymous")
     return _auto_session_title(session_id, documents_data["documents"])
 
 
-def set_session_title(session_id: str, title: str) -> None:
+def set_session_title(session_id: str, title: str, user_id: str = "anonymous") -> None:
     """Guarda el titulo en sessions_data.json."""
     sessions_data = _load_sessions_data()
     now = _now_iso()
@@ -458,19 +538,30 @@ def set_session_title(session_id: str, title: str) -> None:
     if not isinstance(current_data, dict):
         current_data = {
             "created_at": now,
+            "user_id": user_id,
         }
+    elif current_data.get("user_id") and current_data.get("user_id") != user_id:
+        raise ValueError("La sesion no pertenece al usuario")
+    elif not current_data.get("user_id") and user_id != "anonymous":
+        raise ValueError("La sesion no pertenece al usuario")
 
     current_data["title"] = title
+    current_data["user_id"] = user_id
     current_data["last_updated"] = now
     sessions_data[session_id] = current_data
     _save_sessions_data(sessions_data)
 
 
-def get_session_messages(session_id: str) -> list[dict]:
+def get_session_messages(session_id: str, user_id: str = "anonymous") -> list[dict]:
     """Devuelve los mensajes guardados de una sesion."""
     data = _load_sessions_data()
     session_data = data.get(session_id, {})
     if not isinstance(session_data, dict):
+        return []
+    session_user_id = session_data.get("user_id")
+    if session_user_id and session_user_id != user_id:
+        return []
+    if not session_user_id and user_id != "anonymous":
         return []
     messages = session_data.get("messages", [])
     if not isinstance(messages, list):
@@ -520,6 +611,7 @@ def append_session_message(
     content: str,
     sources: list[dict] | None = None,
     follow_ups: list[str] | None = None,
+    user_id: str = "anonymous",
 ) -> None:
     """Agrega un mensaje al historial de la sesion."""
     data = _load_sessions_data()
@@ -530,7 +622,12 @@ def append_session_message(
         current_data = {
             "title": _auto_session_title(session_id),
             "created_at": now,
+            "user_id": user_id,
         }
+    elif current_data.get("user_id") and current_data.get("user_id") != user_id:
+        raise ValueError("La sesion no pertenece al usuario")
+    elif not current_data.get("user_id") and user_id != "anonymous":
+        raise ValueError("La sesion no pertenece al usuario")
 
     if "messages" not in current_data:
         current_data["messages"] = []
@@ -546,12 +643,17 @@ def append_session_message(
         message_data["followUps"] = follow_ups
 
     current_data["messages"].append(message_data)
+    current_data["user_id"] = user_id
     current_data["last_updated"] = now
     data[session_id] = current_data
     _save_sessions_data(data)
 
 
-def _touch_session(session_id: str, fallback_title: str | None = None) -> None:
+def _touch_session(
+    session_id: str,
+    fallback_title: str | None = None,
+    user_id: str = "anonymous",
+) -> None:
     """Actualiza la metadata basica de una sesion."""
     sessions_data = _load_sessions_data()
     now = _now_iso()
@@ -561,28 +663,39 @@ def _touch_session(session_id: str, fallback_title: str | None = None) -> None:
         current_data = {
             "title": fallback_title or _auto_session_title(session_id),
             "created_at": now,
+            "user_id": user_id,
         }
+    elif current_data.get("user_id") and current_data.get("user_id") != user_id:
+        raise ValueError("La sesion no pertenece al usuario")
+    elif not current_data.get("user_id") and user_id != "anonymous":
+        raise ValueError("La sesion no pertenece al usuario")
 
     if not current_data.get("title"):
         current_data["title"] = fallback_title or _auto_session_title(session_id)
     if not current_data.get("created_at"):
         current_data["created_at"] = now
+    current_data["user_id"] = user_id
     current_data["last_updated"] = now
     sessions_data[session_id] = current_data
     _save_sessions_data(sessions_data)
 
 
-def get_session_documents(session_id: str) -> dict:
+def get_session_documents(session_id: str, user_id: str = "anonymous") -> dict:
     """
     Scrollea puntos de una sesion especifica.
     Devuelve: { documents: [{filename, chunks}], total_chunks }
     """
-    points = _scroll_all_points(_session_filter(session_id))
+    points = _scroll_all_points(_user_session_filter(user_id, session_id))
     documents, total_chunks = _documents_from_points(points)
     return {"documents": documents, "total_chunks": total_chunks}
 
 
-def ingest_bytes(data: bytes, filename: str, session_id: str = "default") -> int:
+def ingest_bytes(
+    data: bytes,
+    filename: str,
+    session_id: str = "default",
+    user_id: str = "anonymous",
+) -> int:
     """Ingest a document. Returns chunk count."""
     init_rag()
     client = _get_qdrant()
@@ -630,10 +743,11 @@ def ingest_bytes(data: bytes, filename: str, session_id: str = "default") -> int
                 "source": filename,
                 "chunk_index": i,
                 "session_id": session_id,
+                "user_id": user_id,
             },
         ))
     client.upsert(collection_name=settings.collection_name, points=points)
-    _touch_session(session_id, filename)
+    _touch_session(session_id, filename, user_id)
 
     return len(chunks)
 
@@ -693,7 +807,11 @@ def _rerank(
     return [hit for hit, _ in scored_hits[:top_k]]
 
 
-def chat(message: str, session_id: str = "default") -> tuple[str, list[dict], list[str]]:
+def chat(
+    message: str,
+    session_id: str = "default",
+    user_id: str = "anonymous",
+) -> tuple[str, list[dict], list[str]]:
     """Query RAG: embed message → retrieve chunks → Gemini answers."""
     init_rag()
     client = _get_qdrant()
@@ -708,7 +826,7 @@ def chat(message: str, session_id: str = "default") -> tuple[str, list[dict], li
     )
     query_vector = resp.data[0].embedding
 
-    query_filter = _session_filter(session_id)
+    query_filter = _user_session_filter(user_id, session_id)
 
     # Search Qdrant
     search_result = client.query_points(
@@ -722,7 +840,7 @@ def chat(message: str, session_id: str = "default") -> tuple[str, list[dict], li
             ),
             Prefetch(
                 limit=settings.rerank_top_k * 3,
-                filter=_session_text_filter(session_id, message),
+                filter=_user_session_text_filter(user_id, session_id, message),
             ),
         ],
         query=FusionQuery(fusion=Fusion.RRF),
@@ -733,8 +851,12 @@ def chat(message: str, session_id: str = "default") -> tuple[str, list[dict], li
         search_result = _rerank(message, search_result, settings.rerank_final_k)
 
     if not search_result:
-        global_result = _global_hybrid_search(client, query_vector, message)
-        cross_session_message = _cross_session_message(global_result, session_id)
+        global_result = _global_hybrid_search(client, query_vector, message, user_id)
+        cross_session_message = _cross_session_message(
+            global_result,
+            session_id,
+            user_id,
+        )
         if cross_session_message:
             return cross_session_message, [], []
 
@@ -785,9 +907,10 @@ def chat(message: str, session_id: str = "default") -> tuple[str, list[dict], li
 async def chat_stream(
     message: str,
     session_id: str = "default",
+    user_id: str = "anonymous",
 ) -> AsyncGenerator[dict[str, object], None]:
     """Query RAG and stream Gemini chunks, then emit the source list."""
-    append_session_message(session_id, "user", message)
+    append_session_message(session_id, "user", message, user_id=user_id)
     init_rag()
     client = _get_qdrant()
     oai = _get_openai()
@@ -801,7 +924,7 @@ async def chat_stream(
     )
     query_vector = resp.data[0].embedding
 
-    query_filter = _session_filter(session_id)
+    query_filter = _user_session_filter(user_id, session_id)
 
     # Search Qdrant
     search_result = client.query_points(
@@ -815,7 +938,7 @@ async def chat_stream(
             ),
             Prefetch(
                 limit=settings.rerank_top_k * 3,
-                filter=_session_text_filter(session_id, message),
+                filter=_user_session_text_filter(user_id, session_id, message),
             ),
         ],
         query=FusionQuery(fusion=Fusion.RRF),
@@ -828,8 +951,12 @@ async def chat_stream(
     sources: list[dict] = []
     context = ""
     if not search_result:
-        global_result = _global_hybrid_search(client, query_vector, message)
-        cross_session_message = _cross_session_message(global_result, session_id)
+        global_result = _global_hybrid_search(client, query_vector, message, user_id)
+        cross_session_message = _cross_session_message(
+            global_result,
+            session_id,
+            user_id,
+        )
         if cross_session_message:
             append_session_message(
                 session_id,
@@ -837,6 +964,7 @@ async def chat_stream(
                 cross_session_message,
                 sources=[],
                 follow_ups=[],
+                user_id=user_id,
             )
             yield {"type": "cross_session", "message": cross_session_message}
             yield {"type": "done", "sources": [], "follow_ups": []}
@@ -892,15 +1020,16 @@ async def chat_stream(
         full_response,
         sources=sources,
         follow_ups=follow_ups,
+        user_id=user_id,
     )
     yield {"type": "done", "sources": sources, "follow_ups": follow_ups}
 
 
-def delete_session_chunks(session_id: str) -> int:
+def delete_session_chunks(session_id: str, user_id: str = "anonymous") -> int:
     """Delete all indexed chunks for one chat session and return the chunk count."""
     init_rag()
     client = _get_qdrant()
-    query_filter = _session_filter(session_id)
+    query_filter = _user_session_filter(user_id, session_id)
 
     # Count matching points efficiently
     count_result = client.count(
@@ -918,7 +1047,11 @@ def delete_session_chunks(session_id: str) -> int:
 
     # Also clean up sessions_data.json so deleted sessions don't reappear
     sessions_data = _load_sessions_data()
-    if session_id in sessions_data:
+    current_data = sessions_data.get(session_id)
+    if (
+        isinstance(current_data, dict)
+        and (current_data.get("user_id") == user_id or not current_data.get("user_id"))
+    ):
         del sessions_data[session_id]
         _save_sessions_data(sessions_data)
 

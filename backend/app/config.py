@@ -64,6 +64,8 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = Field(default=8000, validation_alias="PORT")
     CORS_ORIGINS: str = "http://localhost:3000"
+    AUTH_SECRET: str = ""
+    AUTH_ALGORITHM: str = "HS256"
 
     chunk_size: int = 1024
     chunk_overlap: int = 200
@@ -112,6 +114,14 @@ class Settings(BaseSettings):
             for origin in self.CORS_ORIGINS.split(",")
             if origin.strip()
         ]
+
+    @property
+    def auth_secret(self) -> str:
+        return self.AUTH_SECRET
+
+    @property
+    def auth_algorithm(self) -> str:
+        return self.AUTH_ALGORITHM
 
 
 settings = Settings()
