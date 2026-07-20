@@ -17,10 +17,12 @@ from qdrant_client.models import (
     FilterSelector,
     Fusion,
     FusionQuery,
+    IsEmptyCondition,
     KeywordIndexParams,
     KeywordIndexType,
     MatchText,
     MatchValue,
+    PayloadField,
     PointStruct,
     Prefetch,
     TextIndexParams,
@@ -183,6 +185,13 @@ def _user_session_text_filter(user_id: str, session_id: str, text: str) -> Filte
 
 
 def _user_scroll_filter(user_id: str) -> Filter:
+    if user_id == "anonymous":
+        return Filter(
+            should=[
+                FieldCondition(key="user_id", match=MatchValue(value="anonymous")),
+                IsEmptyCondition(is_empty=PayloadField(key="user_id")),
+            ]
+        )
     return Filter(
         must=[FieldCondition(key="user_id", match=MatchValue(value=user_id))]
     )

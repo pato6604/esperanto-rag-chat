@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { Source_Serif_4 } from "next/font/google";
 import "./globals.css";
+import { SessionProvider } from "@/components/session-provider";
+import { AuthProvider } from "@/lib/auth-context";
 
 const sourceSerif = Source_Serif_4({
   subsets: ["latin"],
@@ -36,7 +38,11 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body className={`${sourceSerif.variable} antialiased`}>{children}</body>
+      <body className={`${sourceSerif.variable} antialiased`}>
+        <SessionProvider>
+          <AuthProvider>{children}</AuthProvider>
+        </SessionProvider>
+      </body>
     </html>
   );
 }
