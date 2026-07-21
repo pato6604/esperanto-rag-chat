@@ -365,8 +365,13 @@ export default function ChatPage() {
   }
 
   useEffect(() => {
+    if (!isAuthenticated) {
+      setSessions([]);
+      setSessionMessages({});
+      return;
+    }
     fetchSessionData();
-  }, [fetchSessionData]);
+  }, [isAuthenticated, fetchSessionData]);
 
   useEffect(() => {
     if (activeSessionId && sessionMessages[activeSessionId] === undefined) {
