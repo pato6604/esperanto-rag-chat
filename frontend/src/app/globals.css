@@ -111,19 +111,19 @@
 [data-theme="light"] {
   color-scheme: light;
   --bg-primary: #ffffff;
-  --bg-secondary: #f8fafc;
-  --bg-tertiary: #f1f5f9;
-  --text-primary: #0f172a;
-  --text-secondary: #475569;
-  --text-muted: #64748b;
-  --border-color: #e2e8f0;
-  --accent: #059669;
-  --accent-light: rgba(5, 150, 105, 0.25);
-  --sidebar-bg: #f8fafc;
-  --sidebar-border: #e2e8f0;
+  --bg-secondary: #fafafa;
+  --bg-tertiary: #f5f5f5;
+  --text-primary: #171717;
+  --text-secondary: #737373;
+  --text-muted: #a3a3a3;
+  --border-color: #e5e5e5;
+  --accent: #3b82f6;
+  --accent-light: rgba(59, 130, 246, 0.15);
+  --sidebar-bg: #fafafa;
+  --sidebar-border: #e5e5e5;
   --chat-composer-bg: rgb(255 255 255 / 0.92);
   --error-bg: rgb(239 68 68 / 0.1);
-  --modal-overlay: rgb(15 23 42 / 0.32);
+  --modal-overlay: rgb(0 0 0 / 0.2);
   --card-foreground: var(--text-primary);
   --popover-foreground: var(--text-primary);
   --primary-foreground: #ffffff;
@@ -132,12 +132,12 @@
   --destructive-foreground: #ffffff;
   --sidebar-foreground: var(--text-secondary);
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #ecfdf5;
-  --sidebar-accent-foreground: #064e3b;
-  --color-brand-hover: #047857;
-  --color-border-prominent: #cbd5e1;
-  --shadow-brand-glow: 0 0 0 1px color-mix(in srgb, var(--color-brand) 18%, transparent),
-    0 0 28px color-mix(in srgb, var(--color-brand) 14%, transparent);
+  --sidebar-accent: #eff6ff;
+  --sidebar-accent-foreground: #1e40af;
+  --color-brand-hover: #2563eb;
+  --color-border-prominent: #d4d4d4;
+  --shadow-brand-glow: 0 0 0 1px color-mix(in srgb, var(--color-brand) 20%, transparent),
+    0 0 28px color-mix(in srgb, var(--color-brand) 12%, transparent);
 }
 
 @layer base {
@@ -257,7 +257,7 @@
   }
 
   .chat-composer:focus-within {
-    border-color: rgb(62 207 142 / 0.58);
+    border-color: color-mix(in srgb, var(--color-brand) 58%, transparent);
     box-shadow: var(--shadow-brand-glow);
     transform: translateY(-1px);
   }
