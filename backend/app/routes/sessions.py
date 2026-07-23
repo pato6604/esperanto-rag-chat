@@ -22,12 +22,15 @@ async def list_sessions(user_id: str = Depends(get_current_user)):
 
 
 def _check_session_ownership(session_id: str, user_id: str) -> None:
-    """Lanza 403 si la sesion no pertenece al usuario."""
+    """Lanza 403 si la sesion no pertenece al usuario.
+    Las sesiones legacy con user_id='anonymous' son accesibles por cualquier usuario autenticado."""
+    if user_id == "anonymous":
+        return
     sessions_data = rag_engine._load_sessions_data()
     session_data = sessions_data.get(session_id)
     if isinstance(session_data, dict):
         session_user_id = session_data.get("user_id")
-        if session_user_id and session_user_id != user_id:
+        if not rag_engine._session_belongs_to_user(session_user_id, user_id):
             raise HTTPException(status_code=403, detail="La sesion no pertenece al usuario")
 
 

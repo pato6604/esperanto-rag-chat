@@ -6,6 +6,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -13,6 +14,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { createApiFetch } from "@/lib/api-fetch";
 import { useAuth } from "@/lib/auth-context";
 import { signIn, signOut } from "next-auth/react";
 import {
@@ -176,7 +178,7 @@ function MessageSources({ sources }: { sources: SourceInfo[] }) {
 }
 
 export default function ChatPage() {
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, user, token } = useAuth();
   const [sessionMessages, setSessionMessages] = useState<
     Record<string, Message[]>
   >({});
@@ -202,6 +204,7 @@ export default function ChatPage() {
   );
 
   const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  const apiFetch = useMemo(() => createApiFetch(() => token), [token]);
   const activeSession = sessions.find((session) => session.active);
   const activeSessionId = activeSession?.id;
   const activeSessionTitle = activeSession?.title || "Carga tu documento";
@@ -245,7 +248,7 @@ export default function ChatPage() {
   }, []);
 
   const fetchSessionData = useCallback(() => {
-    fetch(`${API_BASE}/api/sessions`)
+    apiFetch(`${API_BASE}/api/sessions`)
       .then((res) => res.json())
       .then((data) => {
         if (data && Array.isArray(data)) {
@@ -290,7 +293,7 @@ export default function ChatPage() {
       .catch(() => {
         // Si falla, mantener el estado local sin romper la app.
       });
-  }, [API_BASE]);
+  }, [API_BASE, apiFetch]);
 
   function updateSessionMessages(
     sessionId: string,
@@ -310,7 +313,7 @@ export default function ChatPage() {
 
   async function loadSessionMessages(sessionId: string) {
     try {
-      const res = await fetch(`${API_BASE}/api/sessions/${sessionId}/messages`);
+      const res = await apiFetch(`${API_BASE}/api/sessions/${sessionId}/messages`);
       if (!res.ok) return;
       const data = await res.json();
       if (Array.isArray(data.messages)) {
@@ -355,9 +358,8 @@ export default function ChatPage() {
           session.id === activeSessionId ? { ...session, title: newTitle } : session,
         ),
       );
-      fetch(`${API_BASE}/api/sessions/${activeSessionId}/title`, {
+      apiFetch(`${API_BASE}/api/sessions/${activeSessionId}/title`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: newTitle }),
       }).catch(() => {});
     }
@@ -387,7 +389,7 @@ export default function ChatPage() {
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), 3000);
 
-    fetch(`${API_BASE}/health`, { signal: controller.signal })
+    apiFetch(`${API_BASE}/health`, { signal: controller.signal })
       .then((res) => {
         setApiStatus(res.ok ? "ok" : "error");
       })
@@ -402,7 +404,7 @@ export default function ChatPage() {
       window.clearTimeout(timeout);
       controller.abort();
     };
-  }, [API_BASE]);
+  }, [API_BASE, apiFetch]);
 
   useEffect(() => {
     return () => {
@@ -462,9 +464,8 @@ export default function ChatPage() {
       return;
     }
 
-    const res = await fetch(`${API_BASE}/api/chat`, {
+    const res = await apiFetch(`${API_BASE}/api/chat`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message: messageText, session_id: sessionId }),
     });
 
@@ -525,7 +526,7 @@ export default function ChatPage() {
         message: messageText,
         session_id: currentSessionId,
       });
-      const res = await fetch(`${API_BASE}/api/chat/stream?${params}`, {
+      const res = await apiFetch(`${API_BASE}/api/chat/stream?${params}`, {
         signal: streamController.signal,
       });
       const contentType = res.headers.get("content-type") || "";
@@ -708,7 +709,7 @@ export default function ChatPage() {
 
     try {
       const params = new URLSearchParams({ session_id: currentSessionId });
-      const res = await fetch(`${API_BASE}/api/upload?${params}`, {
+      const res = await apiFetch(`${API_BASE}/api/upload?${params}`, {
         method: "POST",
         body: form,
       });
@@ -1231,9 +1232,8 @@ export default function ChatPage() {
                       active: index === 0,
                     }));
                   });
-                  fetch(`${API_BASE}/api/sessions/delete`, {
+                  apiFetch(`${API_BASE}/api/sessions/delete`, {
                     method: "POST",
-                    headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ session_id: s.id }),
                   }).catch(() => {});
                 }}

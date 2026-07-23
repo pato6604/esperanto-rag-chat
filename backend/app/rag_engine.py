@@ -166,34 +166,57 @@ def _session_text_filter(session_id: str, text: str) -> Filter:
 
 
 def _user_session_filter(user_id: str, session_id: str) -> Filter:
+    user_conditions = [
+        FieldCondition(key="user_id", match=MatchValue(value=user_id)),
+        FieldCondition(key="user_id", match=MatchValue(value="anonymous")),
+        IsEmptyCondition(is_empty=PayloadField(key="user_id")),
+    ]
+    if user_id == "anonymous":
+        user_conditions = user_conditions[1:]
+
     return Filter(
         must=[
-            FieldCondition(key="user_id", match=MatchValue(value=user_id)),
             FieldCondition(key="session_id", match=MatchValue(value=session_id)),
-        ]
+        ],
+        should=user_conditions,
     )
 
 
 def _user_session_text_filter(user_id: str, session_id: str, text: str) -> Filter:
+    user_conditions = [
+        FieldCondition(key="user_id", match=MatchValue(value=user_id)),
+        FieldCondition(key="user_id", match=MatchValue(value="anonymous")),
+        IsEmptyCondition(is_empty=PayloadField(key="user_id")),
+    ]
+    if user_id == "anonymous":
+        user_conditions = user_conditions[1:]
+
     return Filter(
         must=[
-            FieldCondition(key="user_id", match=MatchValue(value=user_id)),
             FieldCondition(key="session_id", match=MatchValue(value=session_id)),
             FieldCondition(key="text", match=MatchText(text=text)),
-        ]
+        ],
+        should=user_conditions,
     )
 
 
 def _user_scroll_filter(user_id: str) -> Filter:
+    user_conditions = [
+        FieldCondition(key="user_id", match=MatchValue(value=user_id)),
+        FieldCondition(key="user_id", match=MatchValue(value="anonymous")),
+        IsEmptyCondition(is_empty=PayloadField(key="user_id")),
+    ]
     if user_id == "anonymous":
-        return Filter(
-            should=[
-                FieldCondition(key="user_id", match=MatchValue(value="anonymous")),
-                IsEmptyCondition(is_empty=PayloadField(key="user_id")),
-            ]
-        )
-    return Filter(
-        must=[FieldCondition(key="user_id", match=MatchValue(value=user_id))]
+        user_conditions = user_conditions[1:]
+
+    return Filter(should=user_conditions)
+
+
+def _session_belongs_to_user(session_user_id: object, user_id: str) -> bool:
+    return (
+        not session_user_id
+        or session_user_id == "anonymous"
+        or session_user_id == user_id
     )
 
 
@@ -457,10 +480,7 @@ def get_all_sessions(user_id: str = "anonymous") -> list[dict]:
         str(session_id)
         for session_id, session_data in sessions_data.items()
         if isinstance(session_data, dict)
-        and (
-            session_data.get("user_id") == user_id
-            or (user_id == "anonymous" and not session_data.get("user_id"))
-        )
+        and _session_belongs_to_user(session_data.get("user_id"), user_id)
     }
 
     for session_id in session_ids:
@@ -478,7 +498,7 @@ def get_all_sessions(user_id: str = "anonymous") -> list[dict]:
             sessions_data[session_id] = current_data
             data_changed = True
         else:
-            if current_data.get("user_id") and current_data.get("user_id") != user_id:
+            if current_data.get("user_id") and current_data.get("user_id") != "anonymous" and current_data.get("user_id") != user_id:
                 current_data = {
                     "title": _auto_session_title(session_id, documents),
                     "created_at": now,
@@ -528,9 +548,7 @@ def get_session_title(session_id: str, user_id: str = "") -> str:
     session_data = sessions_data.get(session_id)
     if isinstance(session_data, dict) and session_data.get("title"):
         session_user_id = session_data.get("user_id")
-        if user_id and session_user_id and session_user_id != user_id:
-            return _auto_session_title(session_id)
-        if user_id and not session_user_id and user_id != "anonymous":
+        if user_id and not _session_belongs_to_user(session_user_id, user_id):
             return _auto_session_title(session_id)
         return str(session_data["title"])
 
@@ -549,9 +567,7 @@ def set_session_title(session_id: str, title: str, user_id: str = "anonymous") -
             "created_at": now,
             "user_id": user_id,
         }
-    elif current_data.get("user_id") and current_data.get("user_id") != user_id:
-        raise ValueError("La sesion no pertenece al usuario")
-    elif not current_data.get("user_id") and user_id != "anonymous":
+    elif current_data.get("user_id") and current_data.get("user_id") != "anonymous" and current_data.get("user_id") != user_id:
         raise ValueError("La sesion no pertenece al usuario")
 
     current_data["title"] = title
@@ -568,9 +584,7 @@ def get_session_messages(session_id: str, user_id: str = "anonymous") -> list[di
     if not isinstance(session_data, dict):
         return []
     session_user_id = session_data.get("user_id")
-    if session_user_id and session_user_id != user_id:
-        return []
-    if not session_user_id and user_id != "anonymous":
+    if not _session_belongs_to_user(session_user_id, user_id):
         return []
     messages = session_data.get("messages", [])
     if not isinstance(messages, list):
@@ -633,9 +647,7 @@ def append_session_message(
             "created_at": now,
             "user_id": user_id,
         }
-    elif current_data.get("user_id") and current_data.get("user_id") != user_id:
-        raise ValueError("La sesion no pertenece al usuario")
-    elif not current_data.get("user_id") and user_id != "anonymous":
+    elif current_data.get("user_id") and current_data.get("user_id") != "anonymous" and current_data.get("user_id") != user_id:
         raise ValueError("La sesion no pertenece al usuario")
 
     if "messages" not in current_data:
@@ -674,9 +686,7 @@ def _touch_session(
             "created_at": now,
             "user_id": user_id,
         }
-    elif current_data.get("user_id") and current_data.get("user_id") != user_id:
-        raise ValueError("La sesion no pertenece al usuario")
-    elif not current_data.get("user_id") and user_id != "anonymous":
+    elif current_data.get("user_id") and current_data.get("user_id") != "anonymous" and current_data.get("user_id") != user_id:
         raise ValueError("La sesion no pertenece al usuario")
 
     if not current_data.get("title"):
@@ -1059,7 +1069,7 @@ def delete_session_chunks(session_id: str, user_id: str = "anonymous") -> int:
     current_data = sessions_data.get(session_id)
     if (
         isinstance(current_data, dict)
-        and (current_data.get("user_id") == user_id or not current_data.get("user_id"))
+        and _session_belongs_to_user(current_data.get("user_id"), user_id)
     ):
         del sessions_data[session_id]
         _save_sessions_data(sessions_data)
