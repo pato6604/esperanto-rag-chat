@@ -66,6 +66,8 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = "http://localhost:3000"
     AUTH_SECRET: str = ""
     AUTH_ALGORITHM: str = "HS256"
+    ENV: str = "development"
+    max_upload_size_mb: int = 10
 
     chunk_size: int = 1024
     chunk_overlap: int = 200

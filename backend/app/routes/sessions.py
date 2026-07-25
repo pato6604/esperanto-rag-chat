@@ -3,6 +3,7 @@ from pydantic import BaseModel
 
 from app import rag_engine
 from app.auth import get_current_user
+from app.rate_limiter import rate_limiter
 
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
@@ -18,6 +19,7 @@ async def list_sessions(user_id: str = Depends(get_current_user)):
     Escanea Qdrant y agrupa puntos por session_id.
     Devuelve sesiones con documentos, chunks y fecha de actualizacion.
     """
+    rate_limiter.check(user_id, max_requests=30, window_sec=60)
     return rag_engine.get_all_sessions(user_id)
 
 
@@ -42,6 +44,7 @@ async def get_session_detail(
     """
     Devuelve informacion detallada de una sesion: documentos y chunks.
     """
+    rate_limiter.check(user_id, max_requests=30, window_sec=60)
     _check_session_ownership(session_id, user_id)
     documents_data = rag_engine.get_session_documents(session_id, user_id)
     return {
@@ -56,6 +59,7 @@ async def get_messages(
     session_id: str,
     user_id: str = Depends(get_current_user),
 ):
+    rate_limiter.check(user_id, max_requests=30, window_sec=60)
     _check_session_ownership(session_id, user_id)
     messages = rag_engine.get_session_messages(session_id, user_id)
     return {"session_id": session_id, "messages": messages}
@@ -70,6 +74,7 @@ async def rename_session(
     """
     Actualiza el titulo de una sesion en sessions_data.json.
     """
+    rate_limiter.check(user_id, max_requests=10, window_sec=60)
     title = body.title.strip()
     if not title:
         raise HTTPException(status_code=400, detail="El titulo no puede estar vacio")

@@ -8,6 +8,7 @@ from openai import OpenAIError, RateLimitError
 
 from app import rag_engine
 from app.auth import get_current_user
+from app.config import settings
 from app.models import (
     ChatRequest,
     ChatResponse,
@@ -15,10 +16,12 @@ from app.models import (
     DeleteSessionResponse,
     UploadResponse,
 )
+from app.rate_limiter import rate_limiter
 
 router = APIRouter(prefix="/api", tags=["chat"])
 logger = logging.getLogger(__name__)
 
+MAX_UPLOAD_SIZE = settings.max_upload_size_mb * 1024 * 1024
 RATE_LIMIT_MESSAGE = "Gemini esta recargando, espera 30 segundos y volve a preguntar"
 TIMEOUT_MESSAGE = "La respuesta tardo demasiado. Espera unos segundos y volve a intentar."
 
@@ -35,6 +38,7 @@ async def chat_endpoint(
     body: ChatRequest,
     user_id: str = Depends(get_current_user),
 ):
+    rate_limiter.check(user_id, max_requests=30, window_sec=60)
     if not body.message.strip():
         raise HTTPException(status_code=400, detail="El mensaje no puede estar vacio")
     try:
@@ -71,6 +75,7 @@ async def chat_get(
     session_id: str = "default",
     user_id: str = Depends(get_current_user),
 ):
+    rate_limiter.check(user_id, max_requests=30, window_sec=60)
     try:
         response_text, sources, follow_ups = rag_engine.chat(
             message,
@@ -100,6 +105,7 @@ async def chat_stream(
     session_id: str = "default",
     user_id: str = Depends(get_current_user),
 ):
+    rate_limiter.check(user_id, max_requests=30, window_sec=60)
     if not message.strip():
         raise HTTPException(status_code=400, detail="El mensaje no puede estar vacio")
 
@@ -147,9 +153,20 @@ async def upload_file(
     session_id: str = "default",
     user_id: str = Depends(get_current_user),
 ):
+    rate_limiter.check(user_id, max_requests=5, window_sec=60)
     if not file.filename:
         raise HTTPException(status_code=400, detail="No se recibio ningun archivo")
+    if file.size and file.size > MAX_UPLOAD_SIZE:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Archivo demasiado grande. Maximo permitido: {MAX_UPLOAD_SIZE // (1024 * 1024)}MB",
+        )
     data = await file.read()
+    if len(data) > MAX_UPLOAD_SIZE:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Archivo demasiado grande. Maximo permitido: {MAX_UPLOAD_SIZE // (1024 * 1024)}MB",
+        )
     try:
         chunks = rag_engine.ingest_bytes(
             data,
@@ -170,5 +187,6 @@ async def delete_session(
     body: DeleteSessionRequest,
     user_id: str = Depends(get_current_user),
 ):
+    rate_limiter.check(user_id, max_requests=10, window_sec=60)
     deleted = rag_engine.delete_session_chunks(body.session_id, user_id=user_id)
     return DeleteSessionResponse(deleted_chunks=deleted, session_id=body.session_id)
